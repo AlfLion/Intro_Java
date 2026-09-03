@@ -14,4 +14,18 @@ public record PlanoConjugado(int placasCheias,
     public boolean temTiraComplementar() {
         return tiraComplementar != null;
     }
+
+    /** Quanto do rolo do material mais largo (ex.: Poron) este plano consome, em mm. */
+    public double consumoMaterialMaisLargoMm() {
+        return placasCheias * comprimentoPlacaCheiaMm + comprimentoTiraMm();
+    }
+
+    /** Quanto do rolo do material mais estreito (ex.: cola transfer) este plano consome, em mm. */
+    public double consumoMaterialMaisEstreitoMm() {
+        return placasCheias * larguraPlacaCheiaMm + comprimentoTiraMm();
+    }
+
+    private double comprimentoTiraMm() {
+        return temTiraComplementar() ? tiraComplementar.comprimentoMm() : 0;
+    }
 }
