@@ -45,4 +45,13 @@ public class Peca {
     public Peca comQuantidade(int novaQuantidade) {
         return new Peca(nome, larguraMm, comprimentoMm, novaQuantidade);
     }
+
+    /** A mesma peça rotacionada 90° (largura e comprimento trocados) — nunca espelhada. */
+    public Peca girada() {
+        return new Peca(nome, comprimentoMm, larguraMm, quantidade);
+    }
+
+    public boolean isQuadrada() {
+        return larguraMm == comprimentoMm;
+    }
 }

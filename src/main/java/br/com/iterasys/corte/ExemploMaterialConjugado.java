@@ -1,5 +1,8 @@
 package br.com.iterasys.corte;
 
+import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
+
 /**
  * Demonstração em console do cálculo de material conjugado: Poron (1400mm) +
  * cola transfer (1220mm) para atender a demanda de uma peça.
@@ -7,12 +10,14 @@ package br.com.iterasys.corte;
 public class ExemploMaterialConjugado {
 
     public static void main(String[] args) {
+        System.setOut(new PrintStream(System.out, true, StandardCharsets.UTF_8));
         Material poron = new Material("Poron", 1400);
         Material colaTransfer = new Material("Cola transfer", 1220);
         MaterialConjugado poronComCola = new MaterialConjugado(poron, colaTransfer);
 
         imprimirPlano(poronComCola, new Peca("Gaxeta", 200, 100, 262));
         imprimirPlano(poronComCola, new Peca("Suporte", 600, 700, 5));
+        imprimirPlano(poronComCola, new Peca("Console", 900, 750, 5));
     }
 
     private static void imprimirPlano(MaterialConjugado material, Peca peca) {
@@ -21,12 +26,13 @@ public class ExemploMaterialConjugado {
         System.out.println("Peça: " + peca.getNome() + " " + peca.getLarguraMm() + "x"
                 + peca.getComprimentoMm() + "mm, quantidade " + peca.getQuantidade());
         System.out.println("Placas cheias (" + plano.larguraPlacaCheiaMm() + "x"
-                + plano.comprimentoPlacaCheiaMm() + "mm, sem sobra): " + plano.placasCheias());
+                + plano.comprimentoPlacaCheiaMm() + "mm, sem sobra): " + plano.placasCheias()
+                + (plano.placasCheias() > 0 && plano.placaGirada() ? " (peça girada 90°)" : ""));
 
         if (plano.temTiraComplementar()) {
             TiraComplementar tira = plano.tiraComplementar();
             System.out.println("Tira complementar: " + tira.larguraMm() + "x" + tira.comprimentoMm()
-                    + "mm (" + tira.quantidadePecas() + " peças)");
+                    + "mm (" + tira.quantidadePecas() + " peças)" + (tira.pecaGirada() ? " (peça girada 90°)" : ""));
 
             SobraMaterial sobra = plano.sobra();
             System.out.println("Sobra: " + sobra.material().getNome() + " " + sobra.larguraMm()

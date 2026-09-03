@@ -4,10 +4,13 @@ package br.com.iterasys.corte;
  * Plano de corte para uma peça que demanda um material conjugado: quantas placas
  * cheias (sem sobra) são necessárias, e, se a quantidade não fechar em placas
  * cheias, a tira complementar aberta e a sobra do material mais largo que ela gera.
+ * {@code placaGirada} indica se a peça precisa ser cortada rotacionada 90° (nunca
+ * espelhada) dentro da placa cheia.
  */
 public record PlanoConjugado(int placasCheias,
                               double larguraPlacaCheiaMm,
                               double comprimentoPlacaCheiaMm,
+                              boolean placaGirada,
                               TiraComplementar tiraComplementar,
                               SobraMaterial sobra) {
 

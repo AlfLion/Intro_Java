@@ -23,9 +23,10 @@ class CalculadoraOrdemServicoTest {
         assertEquals(3, resumo.resultadosPorItem().size());
         assertEquals(2, resumo.sobras().size());
 
+        // Suporte 600x700 (qtd 5) prefere placa girada: 1 placa cheia (1220/1400mm) + tira de 1 peça (600mm)
         assertEquals(150, resumo.consumoTotalPorMaterialMm().get("EVA"));
-        assertEquals(3 * 1220 + 200 + 0 * 1220 + 2100, resumo.consumoTotalPorMaterialMm().get("Poron"));
-        assertEquals(3 * 1400 + 200 + 0 * 1400 + 2100, resumo.consumoTotalPorMaterialMm().get("Cola transfer"));
+        assertEquals(3 * 1220 + 200 + 1 * 1220 + 600, resumo.consumoTotalPorMaterialMm().get("Poron"));
+        assertEquals(3 * 1400 + 200 + 1 * 1400 + 600, resumo.consumoTotalPorMaterialMm().get("Cola transfer"));
 
         ResultadoItem resultadoGaxeta = resumo.resultadosPorItem().get(1);
         assertEquals(3, resultadoGaxeta.planoConjugado().placasCheias());

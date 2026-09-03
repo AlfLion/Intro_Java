@@ -48,7 +48,7 @@ public class OrdemServicoConsole {
         try {
             NestingResultado resultado = CalculadoraNesting.calcularAberturaNecessaria(largura, peca);
             System.out.println();
-            System.out.println("Peças por fileira: " + resultado.pecasPorFileira());
+            System.out.println("Peças por fileira: " + resultado.pecasPorFileira() + textoGirada(resultado.pecaGirada()));
             System.out.println("Fileiras necessárias: " + resultado.fileiras());
             System.out.println("Comprimento a abrir do material: " + resultado.comprimentoNecessarioMm() + "mm");
         } catch (IllegalArgumentException e) {
@@ -82,12 +82,12 @@ public class OrdemServicoConsole {
         System.out.println("Material mais estreito: " + material.getMaterialMaisEstreito());
         System.out.println();
         System.out.println("Placas cheias (" + plano.larguraPlacaCheiaMm() + "x" + plano.comprimentoPlacaCheiaMm()
-                + "mm, sem sobra): " + plano.placasCheias());
+                + "mm, sem sobra): " + plano.placasCheias() + (plano.placasCheias() > 0 ? textoGirada(plano.placaGirada()) : ""));
 
         if (plano.temTiraComplementar()) {
             TiraComplementar tira = plano.tiraComplementar();
             System.out.println("Tira complementar: " + tira.larguraMm() + "x" + tira.comprimentoMm()
-                    + "mm (" + tira.quantidadePecas() + " peças)");
+                    + "mm (" + tira.quantidadePecas() + " peças)" + textoGirada(tira.pecaGirada()));
 
             SobraMaterial sobra = plano.sobra();
             System.out.println("SOBRA: " + sobra.material().getNome() + " " + sobra.larguraMm()
@@ -196,19 +196,20 @@ public class OrdemServicoConsole {
 
             if (resultado.item().isMaterialConjugado()) {
                 PlanoConjugado plano = resultado.planoConjugado();
-                System.out.println("  Placas cheias: " + plano.placasCheias());
+                System.out.println("  Placas cheias: " + plano.placasCheias()
+                        + (plano.placasCheias() > 0 ? textoGirada(plano.placaGirada()) : ""));
                 if (plano.temTiraComplementar()) {
                     TiraComplementar tira = plano.tiraComplementar();
                     SobraMaterial sobra = plano.sobra();
                     System.out.println("  Tira complementar: " + tira.larguraMm() + "x" + tira.comprimentoMm()
-                            + "mm (" + tira.quantidadePecas() + " peças)");
+                            + "mm (" + tira.quantidadePecas() + " peças)" + textoGirada(tira.pecaGirada()));
                     System.out.println("  SOBRA: " + sobra.material().getNome() + " " + sobra.larguraMm()
                             + "x" + sobra.comprimentoMm() + "mm");
                 }
             } else {
                 NestingResultado nesting = resultado.nestingMaterialUnico();
                 System.out.println("  Material: " + resultado.item().getMaterialUnico().getNome());
-                System.out.println("  Comprimento a abrir: " + nesting.comprimentoNecessarioMm() + "mm");
+                System.out.println("  Comprimento a abrir: " + nesting.comprimentoNecessarioMm() + "mm" + textoGirada(nesting.pecaGirada()));
             }
         }
 
@@ -224,6 +225,10 @@ public class OrdemServicoConsole {
                 System.out.println(sobra.material().getNome() + ": " + sobra.larguraMm() + "x" + sobra.comprimentoMm() + "mm");
             }
         }
+    }
+
+    private static String textoGirada(boolean girada) {
+        return girada ? " (peça girada 90°)" : "";
     }
 
     private static Peca lerPeca(Scanner scanner) {

@@ -6,7 +6,9 @@ package br.com.iterasys.corte;
  * largura menor (o que gera sobra do material mais largo) — sempre pelo critério de
  * gastar a menor quantidade possível do material mais largo. Placa cheia só é usada
  * quando ela de fato consome menos material por peça do que a tira; caso contrário,
- * mesmo aceitando a sobra, a tira é a opção mais econômica.
+ * mesmo aceitando a sobra, a tira é a opção mais econômica. Em cada modo, a peça é
+ * testada rotacionada 90° (nunca espelhada) e a orientação que aproveita mais é a
+ * escolhida.
  */
 public final class CalculadoraMaterialConjugado {
 
@@ -17,66 +19,68 @@ public final class CalculadoraMaterialConjugado {
         double larguraPlaca = material.getLarguraPlacaCheiaMm();
         double profundidadePlaca = material.getComprimentoPlacaCheiaMm();
 
-        int pecasPorFileiraPlaca = CalculadoraNesting.pecasPorFileiraOuZero(larguraPlaca, peca);
-        int fileirasPlaca = pecasPorFileiraPlaca == 0 ? 0 : (int) Math.floor(profundidadePlaca / peca.getComprimentoMm());
-        int capacidadePlaca = pecasPorFileiraPlaca * fileirasPlaca;
+        EncaixeEmArea encaixePlaca = CalculadoraNesting.calcularMelhorEncaixeEmArea(larguraPlaca, profundidadePlaca, peca);
+        int capacidadePlaca = encaixePlaca.capacidadeTotal();
 
-        int pecasPorFileiraTira = CalculadoraNesting.pecasPorFileiraOuZero(profundidadePlaca, peca);
+        NestingResultado taxaTira = tentarMelhorTaxaTira(profundidadePlaca, peca);
+        boolean tiraViavel = taxaTira != null;
 
-        if (capacidadePlaca <= 0 && pecasPorFileiraTira <= 0) {
+        if (capacidadePlaca <= 0 && !tiraViavel) {
             throw new IllegalArgumentException(
                     "a peça '" + peca.getNome() + "' não cabe nem na placa cheia (" + larguraPlaca + "x"
-                            + profundidadePlaca + "mm) nem na largura do material mais estreito (" + profundidadePlaca + "mm)");
+                            + profundidadePlaca + "mm) nem na largura do material mais estreito (" + profundidadePlaca
+                            + "mm), girada ou não");
         }
 
-        boolean placaViavel = capacidadePlaca > 0;
-        boolean tiraViavel = pecasPorFileiraTira > 0;
-        boolean placaMaisEconomica = placaViavel
+        boolean placaMaisEconomica = capacidadePlaca > 0
                 && (!tiraViavel || custoPorPeca(profundidadePlaca, capacidadePlaca)
-                        <= custoPorPeca(peca.getComprimentoMm(), pecasPorFileiraTira));
+                        <= custoPorPeca(taxaTira.comprimentoNecessarioMm(), taxaTira.pecasPorFileira()));
 
         if (!placaMaisEconomica) {
-            return usarSomenteTira(material, peca, profundidadePlaca, larguraPlaca, peca.getQuantidade());
+            return comPlacasETira(material, peca, profundidadePlaca, larguraPlaca, 0, false, peca.getQuantidade());
         }
 
         int placasCheias = peca.getQuantidade() / capacidadePlaca;
         int pecasRestantes = peca.getQuantidade() % capacidadePlaca;
 
         if (pecasRestantes == 0) {
-            return new PlanoConjugado(placasCheias, larguraPlaca, profundidadePlaca, null, null);
+            return new PlanoConjugado(placasCheias, larguraPlaca, profundidadePlaca, encaixePlaca.pecaGirada(), null, null);
         }
 
         // para o restante, decide entre completar com mais uma placa cheia inteira
         // (custo fixo de uma profundidade de placa) ou abrir uma tira só do necessário
         double custoPlacaExtra = profundidadePlaca;
-        double custoTiraRestante = tiraViavel
-                ? CalculadoraNesting.calcularAberturaNecessaria(profundidadePlaca, peca.comQuantidade(pecasRestantes)).comprimentoNecessarioMm()
-                : Double.POSITIVE_INFINITY;
+        NestingResultado tiraRestante = tiraViavel
+                ? CalculadoraNesting.calcularAberturaNecessaria(profundidadePlaca, peca.comQuantidade(pecasRestantes))
+                : null;
+        double custoTiraRestante = tiraRestante != null ? tiraRestante.comprimentoNecessarioMm() : Double.POSITIVE_INFINITY;
 
         if (custoPlacaExtra <= custoTiraRestante) {
-            return new PlanoConjugado(placasCheias + 1, larguraPlaca, profundidadePlaca, null, null);
+            return new PlanoConjugado(placasCheias + 1, larguraPlaca, profundidadePlaca, encaixePlaca.pecaGirada(), null, null);
         }
 
-        return comPlacasETira(material, peca, profundidadePlaca, larguraPlaca, placasCheias, pecasRestantes);
+        return comPlacasETira(material, peca, profundidadePlaca, larguraPlaca, placasCheias, encaixePlaca.pecaGirada(), pecasRestantes);
     }
 
-    private static PlanoConjugado usarSomenteTira(MaterialConjugado material, Peca peca, double profundidadePlaca,
-                                                    double larguraPlaca, int quantidade) {
-        return comPlacasETira(material, peca, profundidadePlaca, larguraPlaca, 0, quantidade);
+    private static NestingResultado tentarMelhorTaxaTira(double profundidadePlaca, Peca peca) {
+        try {
+            return CalculadoraNesting.calcularMelhorTaxaPorFileira(profundidadePlaca, peca);
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
     }
 
     private static PlanoConjugado comPlacasETira(MaterialConjugado material, Peca peca, double profundidadePlaca,
-                                                   double larguraPlaca, int placasCheias, int quantidadeNaTira) {
-        Peca pecaDaTira = peca.comQuantidade(quantidadeNaTira);
-        NestingResultado nestingTira = CalculadoraNesting.calcularAberturaNecessaria(profundidadePlaca, pecaDaTira);
+                                                   double larguraPlaca, int placasCheias, boolean placaGirada, int quantidadeNaTira) {
+        NestingResultado nestingTira = CalculadoraNesting.calcularAberturaNecessaria(profundidadePlaca, peca.comQuantidade(quantidadeNaTira));
 
-        TiraComplementar tira = new TiraComplementar(profundidadePlaca, nestingTira.comprimentoNecessarioMm(), quantidadeNaTira);
+        TiraComplementar tira = new TiraComplementar(profundidadePlaca, nestingTira.comprimentoNecessarioMm(), quantidadeNaTira, nestingTira.pecaGirada());
         SobraMaterial sobra = new SobraMaterial(
                 material.getMaterialMaisLargo(),
                 material.getLarguraSobraMm(),
                 nestingTira.comprimentoNecessarioMm());
 
-        return new PlanoConjugado(placasCheias, larguraPlaca, profundidadePlaca, tira, sobra);
+        return new PlanoConjugado(placasCheias, larguraPlaca, profundidadePlaca, placaGirada, tira, sobra);
     }
 
     private static double custoPorPeca(double comprimentoConsumidoMm, int pecasObtidas) {

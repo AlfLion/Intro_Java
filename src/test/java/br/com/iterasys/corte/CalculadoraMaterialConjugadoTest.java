@@ -60,34 +60,46 @@ class CalculadoraMaterialConjugadoTest {
     }
 
     @Test
-    void quandoTiraGastaMenosMaterialQuePlacaPreferATira() {
-        // peça 600x700mm: na placa cheia só cabe 1 fileira de profundidade (700*2 > 1220),
-        // desperdiçando espaço colado dentro da própria placa (610mm de poron/peça).
-        // Na tira, cada fileira abre exatamente 700mm (350mm de poron/peça) — mais econômica.
+    void giroNaPlacaPodeTornarAPlacaMaisEconomicaQueATira() {
+        // peça 600x700mm: sem girar só cabe 1 fileira de profundidade na placa (700*2 > 1220),
+        // capacidade 2/placa. Girada (700x600), cabem 2 fileiras (600*2 <= 1220), capacidade 4/placa
+        // — 305mm de poron/peça, batendo os 350mm/peça da tira (sem giro, 2 por fileira x 700mm).
         Peca peca = new Peca("Suporte", 600, 700, 5);
+
+        PlanoConjugado plano = CalculadoraMaterialConjugado.calcular(poronComCola, peca);
+
+        assertEquals(1, plano.placasCheias());
+        assertTrue(plano.placaGirada());
+        assertTrue(plano.temTiraComplementar());
+        assertEquals(1, plano.tiraComplementar().quantidadePecas());
+        assertEquals(180, plano.sobra().larguraMm());
+    }
+
+    @Test
+    void quandoTiraGastaMenosMaterialQuePlacaMesmoComGiroPreferATira() {
+        // peça 900x750mm: em qualquer orientação só cabe 1 peça por placa (1220mm de poron/peça),
+        // enquanto a tira (sem girar) abre exatamente 750mm por peça — bem mais econômica.
+        Peca peca = new Peca("Console", 900, 750, 5);
 
         PlanoConjugado plano = CalculadoraMaterialConjugado.calcular(poronComCola, peca);
 
         assertEquals(0, plano.placasCheias());
         assertTrue(plano.temTiraComplementar());
+        assertFalse(plano.tiraComplementar().pecaGirada());
         assertEquals(1220, plano.tiraComplementar().larguraMm());
-        assertEquals(2100, plano.tiraComplementar().comprimentoMm());
+        assertEquals(3750, plano.tiraComplementar().comprimentoMm());
         assertEquals(5, plano.tiraComplementar().quantidadePecas());
         assertEquals(180, plano.sobra().larguraMm());
-        assertEquals(2100, plano.sobra().comprimentoMm());
+        assertEquals(3750, plano.sobra().comprimentoMm());
     }
 
     @Test
-    void quandoPecaNaoCabeNaLarguraEstreitaUsaSomentePlacasCheias() {
-        // peça de 1300mm de largura cabe na placa (1400mm) mas não na tira (1220mm):
-        // não há alternativa de tira, então o restante vira mais uma placa cheia.
-        Peca peca = new Peca("Painel", 1300, 200, 20);
+    void pecaGrandeDemaisParaAmbosOsModosEmQualquerOrientacaoLancaExcecao() {
+        // com largura > 1220 e comprimento > 1220, nenhuma rotação cabe na profundidade
+        // da placa (1220mm) nem na largura da tira (1220mm) — realmente não cabe em nada.
+        Peca peca = new Peca("Painel gigante", 1300, 1250, 1);
 
-        PlanoConjugado plano = CalculadoraMaterialConjugado.calcular(poronComCola, peca);
-
-        assertEquals(4, plano.placasCheias());
-        assertFalse(plano.temTiraComplementar());
-        assertNull(plano.sobra());
+        assertThrows(IllegalArgumentException.class, () -> CalculadoraMaterialConjugado.calcular(poronComCola, peca));
     }
 
     @Test
