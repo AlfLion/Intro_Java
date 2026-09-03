@@ -11,13 +11,15 @@ public class ExemploMaterialConjugado {
         Material colaTransfer = new Material("Cola transfer", 1220);
         MaterialConjugado poronComCola = new MaterialConjugado(poron, colaTransfer);
 
-        Peca peca = new Peca("Gaxeta", 200, 100, 262);
+        imprimirPlano(poronComCola, new Peca("Gaxeta", 200, 100, 262));
+        imprimirPlano(poronComCola, new Peca("Suporte", 600, 700, 5));
+    }
 
-        PlanoConjugado plano = CalculadoraMaterialConjugado.calcular(poronComCola, peca);
+    private static void imprimirPlano(MaterialConjugado material, Peca peca) {
+        PlanoConjugado plano = CalculadoraMaterialConjugado.calcular(material, peca);
 
         System.out.println("Peça: " + peca.getNome() + " " + peca.getLarguraMm() + "x"
                 + peca.getComprimentoMm() + "mm, quantidade " + peca.getQuantidade());
-        System.out.println();
         System.out.println("Placas cheias (" + plano.larguraPlacaCheiaMm() + "x"
                 + plano.comprimentoPlacaCheiaMm() + "mm, sem sobra): " + plano.placasCheias());
 
@@ -32,5 +34,6 @@ public class ExemploMaterialConjugado {
         } else {
             System.out.println("Quantidade fechou exatamente nas placas cheias, sem sobra.");
         }
+        System.out.println();
     }
 }

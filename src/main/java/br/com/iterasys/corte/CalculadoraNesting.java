@@ -31,12 +31,21 @@ public final class CalculadoraNesting {
     }
 
     private static int pecasPorFileira(double larguraDisponivelMm, Peca peca) {
-        int pecasPorFileira = (int) Math.floor(larguraDisponivelMm / peca.getLarguraMm());
+        int pecasPorFileira = pecasPorFileiraOuZero(larguraDisponivelMm, peca);
         if (pecasPorFileira <= 0) {
             throw new IllegalArgumentException(
                     "a peça '" + peca.getNome() + "' (largura " + peca.getLarguraMm()
                             + "mm) não cabe na largura disponível de " + larguraDisponivelMm + "mm");
         }
         return pecasPorFileira;
+    }
+
+    /**
+     * Igual a {@link #pecasPorFileira}, mas devolve 0 em vez de lançar exceção quando a
+     * peça não cabe — usado quando o chamador precisa avaliar se um modo de corte é
+     * viável antes de decidir se o usa.
+     */
+    public static int pecasPorFileiraOuZero(double larguraDisponivelMm, Peca peca) {
+        return (int) Math.floor(larguraDisponivelMm / peca.getLarguraMm());
     }
 }

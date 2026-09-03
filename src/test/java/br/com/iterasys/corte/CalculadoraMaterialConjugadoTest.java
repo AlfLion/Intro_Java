@@ -60,6 +60,37 @@ class CalculadoraMaterialConjugadoTest {
     }
 
     @Test
+    void quandoTiraGastaMenosMaterialQuePlacaPreferATira() {
+        // peça 600x700mm: na placa cheia só cabe 1 fileira de profundidade (700*2 > 1220),
+        // desperdiçando espaço colado dentro da própria placa (610mm de poron/peça).
+        // Na tira, cada fileira abre exatamente 700mm (350mm de poron/peça) — mais econômica.
+        Peca peca = new Peca("Suporte", 600, 700, 5);
+
+        PlanoConjugado plano = CalculadoraMaterialConjugado.calcular(poronComCola, peca);
+
+        assertEquals(0, plano.placasCheias());
+        assertTrue(plano.temTiraComplementar());
+        assertEquals(1220, plano.tiraComplementar().larguraMm());
+        assertEquals(2100, plano.tiraComplementar().comprimentoMm());
+        assertEquals(5, plano.tiraComplementar().quantidadePecas());
+        assertEquals(180, plano.sobra().larguraMm());
+        assertEquals(2100, plano.sobra().comprimentoMm());
+    }
+
+    @Test
+    void quandoPecaNaoCabeNaLarguraEstreitaUsaSomentePlacasCheias() {
+        // peça de 1300mm de largura cabe na placa (1400mm) mas não na tira (1220mm):
+        // não há alternativa de tira, então o restante vira mais uma placa cheia.
+        Peca peca = new Peca("Painel", 1300, 200, 20);
+
+        PlanoConjugado plano = CalculadoraMaterialConjugado.calcular(poronComCola, peca);
+
+        assertEquals(4, plano.placasCheias());
+        assertFalse(plano.temTiraComplementar());
+        assertNull(plano.sobra());
+    }
+
+    @Test
     void materiaisComMesmaLarguraNaoFormamMaterialConjugado() {
         Material a = new Material("A", 1000);
         Material b = new Material("B", 1000);
