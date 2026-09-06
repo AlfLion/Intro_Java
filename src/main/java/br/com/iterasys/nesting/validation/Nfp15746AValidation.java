@@ -26,19 +26,16 @@ public final class Nfp15746AValidation {
     private static final double MEASURED_ROW_VECTOR_MAGNITUDE_MM = Math.hypot(435.80, 437.27);
 
     public static void main(String[] args) {
-        double outerRadius = PieceFactory.calibrateOuterRadius(TARGET_AREA_MM2, 200.0, 400.0);
-        Polygon basePiece = PieceFactory.build15746A(outerRadius);
+        Polygon basePiece = PieceFactory.build15746A();
 
         double[] bbox = basePiece.boundingBox();
         double bboxWidth = bbox[2] - bbox[0];
         double bboxHeight = bbox[3] - bbox[1];
 
-        System.out.println("=== Calibracao geometrica da peca 15746A ===");
-        System.out.printf("Raio externo calibrado: %.3f mm (interno: %.3f mm)%n",
-                outerRadius, outerRadius - PieceFactory.THICKNESS_MM);
-        System.out.printf("Area do poligono: %.1f mm^2 (alvo: %.1f mm^2)%n",
+        System.out.println("=== Geometria exata da peca 15746A (extraida do DXF real) ===");
+        System.out.printf("Area do poligono: %.1f mm^2 (alvo medido: %.1f mm^2)%n",
                 basePiece.area(), TARGET_AREA_MM2);
-        System.out.printf("Bounding box: %.1f x %.1f mm (alvo aprox.: %.0f x %.0f mm)%n",
+        System.out.printf("Bounding box: %.1f x %.1f mm (alvo medido aprox.: %.0f x %.0f mm)%n",
                 bboxWidth, bboxHeight, TARGET_BBOX_SIDE_MM, TARGET_BBOX_SIDE_MM);
 
         Point2D origin = new Point2D(0, 0);
