@@ -1,0 +1,864 @@
+<title>Bancada de Encaixe</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+:root{
+  --bg:#0a141c;
+  --surface:#0f1e29;
+  --surface-2:#152c3b;
+  --border:#20404f;
+  --border-2:#2b5266;
+  --text:#e6f1f5;
+  --text-muted:#7fa8b8;
+  --accent:#5fd4ff;
+  --accent-dim:#2f8fb0;
+  --piece-fill:#ffb45455;
+  --piece-stroke:#ffb454;
+  --good:#6ee7b7;
+  --warn:#f5c76b;
+  font-size:15px;
+}
+*{box-sizing:border-box;}
+body{
+  margin:0;
+  background:var(--bg);
+  color:var(--text);
+  font-family:'IBM Plex Sans',system-ui,sans-serif;
+}
+.mono{font-family:'IBM Plex Mono',ui-monospace,monospace;}
+h1,h2,h3{text-wrap:balance; margin:0;}
+::selection{background:var(--accent-dim); color:#00131a;}
+
+.page{max-width:1320px; margin:0 auto; padding:28px 24px 60px;}
+
+header.top{
+  display:flex; align-items:baseline; justify-content:space-between; gap:16px;
+  padding-bottom:20px; margin-bottom:24px; border-bottom:1px solid var(--border);
+}
+header.top .brand{display:flex; align-items:baseline; gap:12px;}
+header.top h1{font-size:22px; font-weight:700; letter-spacing:.01em;}
+header.top .tag{color:var(--text-muted); font-size:13px;}
+header.top .status-pill{
+  font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:.06em; text-transform:uppercase;
+  color:var(--accent); border:1px solid var(--border-2); border-radius:100px; padding:5px 12px;
+  background:var(--surface-2);
+}
+
+.workbench{display:grid; grid-template-columns:340px 1fr; gap:20px; align-items:start;}
+@media (max-width:900px){ .workbench{grid-template-columns:1fr;} }
+
+.panel{
+  background:var(--surface); border:1px solid var(--border); border-radius:10px;
+  padding:18px;
+}
+.panel + .panel{margin-top:16px;}
+.panel h2{font-size:12px; text-transform:uppercase; letter-spacing:.08em; color:var(--text-muted); font-weight:600; margin-bottom:14px;}
+
+.dropzone{
+  border:1.5px dashed var(--border-2); border-radius:8px; padding:20px 14px;
+  text-align:center; cursor:pointer; transition:border-color .15s, background .15s;
+  background:var(--surface-2);
+}
+.dropzone:hover, .dropzone.drag{border-color:var(--accent); background:#153244;}
+.dropzone .icon{font-size:22px; margin-bottom:6px; display:block;}
+.dropzone .main{font-size:13px; font-weight:500;}
+.dropzone .sub{font-size:11.5px; color:var(--text-muted); margin-top:3px;}
+.dropzone input{display:none;}
+
+.examples{display:flex; gap:8px; margin-top:10px;}
+.examples button{flex:1;}
+
+.piece-readout{
+  margin-top:12px; padding:10px 12px; border-radius:7px; background:var(--surface-2);
+  border:1px solid var(--border); font-size:12.5px; color:var(--text-muted); display:none;
+}
+.piece-readout.show{display:block;}
+.piece-readout b{color:var(--text); font-weight:600;}
+.piece-readout .row{display:flex; justify-content:space-between; padding:2px 0;}
+
+.field{margin-top:12px;}
+.field label{display:block; font-size:11.5px; color:var(--text-muted); margin-bottom:5px; text-transform:uppercase; letter-spacing:.04em;}
+.field .two{display:grid; grid-template-columns:1fr 1fr; gap:10px;}
+input[type=number]{
+  width:100%; background:var(--surface-2); border:1px solid var(--border); border-radius:6px;
+  color:var(--text); padding:8px 10px; font-family:'IBM Plex Mono',monospace; font-size:13.5px;
+}
+input[type=number]:focus{outline:none; border-color:var(--accent);}
+
+button{
+  font-family:'IBM Plex Sans',sans-serif; font-size:13px; font-weight:600; cursor:pointer;
+  border-radius:7px; border:1px solid var(--border-2); background:var(--surface-2); color:var(--text);
+  padding:9px 14px; transition:background .12s, border-color .12s;
+}
+button:hover{background:#1c3a4c; border-color:var(--accent-dim);}
+button:disabled{opacity:.5; cursor:default;}
+button.primary{
+  width:100%; margin-top:16px; background:var(--accent); color:#052733; border-color:var(--accent);
+  font-size:14px; padding:11px 14px;
+}
+button.primary:hover{background:#7fdeff;}
+button.primary:disabled{background:var(--surface-2); color:var(--text-muted); border-color:var(--border);}
+
+.stats{display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-top:14px;}
+.stat{background:var(--surface-2); border:1px solid var(--border); border-radius:7px; padding:10px 12px;}
+.stat .num{font-family:'IBM Plex Mono',monospace; font-size:20px; font-weight:600; color:var(--accent); font-variant-numeric:tabular-nums;}
+.stat .lbl{font-size:10.5px; color:var(--text-muted); text-transform:uppercase; letter-spacing:.05em; margin-top:2px;}
+.stat.good .num{color:var(--good);}
+
+.viewport{
+  background:var(--surface); border:1px solid var(--border); border-radius:10px;
+  min-height:560px; display:flex; align-items:center; justify-content:center; overflow:hidden;
+  position:relative;
+}
+.viewport .placeholder{color:var(--text-muted); font-size:13px; text-align:center; padding:40px; max-width:320px;}
+.viewport svg{width:100%; height:100%; max-height:720px;}
+.viewport .loading{
+  position:absolute; inset:0; display:none; align-items:center; justify-content:center;
+  background:#0a141ccc; font-family:'IBM Plex Mono',monospace; font-size:13px; color:var(--accent);
+}
+.viewport .loading.show{display:flex;}
+
+table.rank{width:100%; border-collapse:collapse; margin-top:6px; font-size:12.5px;}
+table.rank th{
+  text-align:left; font-size:10.5px; text-transform:uppercase; letter-spacing:.05em; color:var(--text-muted);
+  font-weight:600; padding:6px 8px; border-bottom:1px solid var(--border);
+}
+table.rank td{padding:7px 8px; border-bottom:1px solid var(--border); font-family:'IBM Plex Mono',monospace;}
+table.rank tr:last-child td{border-bottom:none;}
+table.rank tr.winner td{color:var(--good);}
+table.rank .name{font-family:'IBM Plex Sans',sans-serif; font-weight:500;}
+table.rank .mirror-tag{
+  font-family:'IBM Plex Sans',sans-serif; font-size:10px; color:var(--warn); border:1px solid var(--warn);
+  border-radius:4px; padding:1px 5px; margin-left:6px;
+}
+
+.note{font-size:11.5px; color:var(--text-muted); margin-top:14px; line-height:1.5;}
+.note b{color:var(--text);}
+</style>
+
+<div class="page">
+  <header class="top">
+    <div class="brand">
+      <h1>Bancada de Encaixe</h1>
+      <span class="tag">motor de nesting 2D &mdash; upload de DXF real</span>
+    </div>
+    <span class="status-pill" id="engineStatus">motor pronto</span>
+  </header>
+
+  <div class="workbench">
+    <div class="controls">
+      <div class="panel">
+        <h2>1. Peça</h2>
+        <label class="dropzone" id="dropzone">
+          <span class="icon">&#128190;</span>
+          <span class="main">Solte um DXF ou clique pra escolher</span>
+          <span class="sub">LINE / ARC / CIRCLE / LWPOLYLINE, contorno + furos</span>
+          <input type="file" id="fileInput" accept=".dxf,.DXF">
+        </label>
+        <div class="examples">
+          <button id="loadTrap">Exemplo: trapézio</button>
+          <button id="loadBracket">Exemplo: bracket 3 furos</button>
+        </div>
+        <div class="piece-readout" id="pieceReadout"></div>
+      </div>
+
+      <div class="panel">
+        <h2>2. Chapa &amp; parâmetros</h2>
+        <div class="field two">
+          <div><label for="sheetW">Largura (mm)</label><input type="number" id="sheetW" value="914" min="1"></div>
+          <div><label for="sheetH">Altura (mm)</label><input type="number" id="sheetH" value="1010" min="1"></div>
+        </div>
+        <div class="field two">
+          <div><label for="margin">Margem (mm)</label><input type="number" id="margin" value="3" min="0" step="0.5"></div>
+          <div><label for="gap">Espaçamento (mm)</label><input type="number" id="gap" value="2" min="0" step="0.5"></div>
+        </div>
+        <button class="primary" id="runBtn" disabled>Carregue uma peça primeiro</button>
+      </div>
+
+      <div class="panel" id="resultPanel" style="display:none;">
+        <h2>3. Resultado</h2>
+        <div class="stats">
+          <div class="stat good"><div class="num" id="statCount">&mdash;</div><div class="lbl">peças</div></div>
+          <div class="stat"><div class="num" id="statPct">&mdash;</div><div class="lbl">líquido</div></div>
+          <div class="stat"><div class="num" id="statTime">&mdash;</div><div class="lbl">tempo</div></div>
+        </div>
+        <table class="rank" id="rankTable"></table>
+        <p class="note" id="mirrorNote"></p>
+      </div>
+    </div>
+
+    <div class="viewport" id="viewport">
+      <div class="placeholder">Carregue um DXF ou um dos exemplos à esquerda, ajuste a chapa e clique em <b style="color:var(--text)">Empacotar</b>.</div>
+      <div class="loading" id="loadingOverlay">calculando…</div>
+    </div>
+  </div>
+
+  <p class="note">
+    Motor: seleciona sozinho entre 3 mecanismos de encaixe (orientação única, interlock θ/θ+180° em torno do
+    centroide, cola-por-aresta reta) medindo mm²/peça de cada um — a peça revela qual serve melhor, sem
+    classificação manual. Espelhamento nunca é aplicado automaticamente: se um candidato espelhado vencer, ele
+    aparece sinalizado na tabela, não no resultado final. Cada peça aceita é validada por colisão geométrica real
+    antes de entrar na chapa. Porte 1:1 do motor em Java (mesmos algoritmos, mesmos números) — ver
+    <span class="mono">NESTING_PRO_HANDOFF.md</span> no repositório para o código-fonte completo.
+  </p>
+</div>
+
+<script>
+/* ===================== motor (porte do Java) ===================== */
+
+function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
+
+function rotatePoint(p, angDeg, pivot) {
+  const rad = angDeg * Math.PI / 180;
+  const cos = Math.cos(rad), sin = Math.sin(rad);
+  const dx = p.x - pivot.x, dy = p.y - pivot.y;
+  return { x: pivot.x + dx * cos - dy * sin, y: pivot.y + dx * sin + dy * cos };
+}
+
+function polygonArea(pts) {
+  let a = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const p = pts[i], q = pts[(i + 1) % pts.length];
+    a += p.x * q.y - q.x * p.y;
+  }
+  return a / 2;
+}
+
+function centroid(pts) {
+  let a = 0, cx = 0, cy = 0;
+  const n = pts.length;
+  for (let i = 0; i < n; i++) {
+    const p0 = pts[i], p1 = pts[(i + 1) % n];
+    const cross = p0.x * p1.y - p1.x * p0.y;
+    a += cross;
+    cx += (p0.x + p1.x) * cross;
+    cy += (p0.y + p1.y) * cross;
+  }
+  a /= 2;
+  return { x: cx / (6 * a), y: cy / (6 * a) };
+}
+
+function boundingBox(pts) {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const p of pts) {
+    minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
+    minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
+  }
+  return [minX, minY, maxX, maxY];
+}
+
+function translatePoly(pts, v) { return pts.map(p => ({ x: p.x + v.x, y: p.y + v.y })); }
+
+function cross3(a, b, c) { return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x); }
+
+function onSegment(a, b, p) {
+  return Math.min(a.x, b.x) <= p.x && p.x <= Math.max(a.x, b.x) &&
+         Math.min(a.y, b.y) <= p.y && p.y <= Math.max(a.y, b.y);
+}
+
+function segmentsIntersect(p1, p2, p3, p4) {
+  const d1 = cross3(p3, p4, p1), d2 = cross3(p3, p4, p2);
+  const d3 = cross3(p1, p2, p3), d4 = cross3(p1, p2, p4);
+  if (((d1 > 0) !== (d2 > 0)) && ((d3 > 0) !== (d4 > 0))) return true;
+  if (d1 === 0 && onSegment(p3, p4, p1)) return true;
+  if (d2 === 0 && onSegment(p3, p4, p2)) return true;
+  if (d3 === 0 && onSegment(p1, p2, p3)) return true;
+  return d4 === 0 && onSegment(p1, p2, p4);
+}
+
+function containsPoint(poly, pt) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const vi = poly[i], vj = poly[j];
+    const hit = ((vi.y > pt.y) !== (vj.y > pt.y)) &&
+      (pt.x < (vj.x - vi.x) * (pt.y - vi.y) / (vj.y - vi.y) + vi.x);
+    if (hit) inside = !inside;
+  }
+  return inside;
+}
+
+function overlaps(a, b) {
+  const boxA = boundingBox(a), boxB = boundingBox(b);
+  if (boxA[2] < boxB[0] || boxB[2] < boxA[0] || boxA[3] < boxB[1] || boxB[3] < boxA[1]) return false;
+  for (let i = 0; i < a.length; i++) {
+    const a1 = a[i], a2 = a[(i + 1) % a.length];
+    for (let j = 0; j < b.length; j++) {
+      const b1 = b[j], b2 = b[(j + 1) % b.length];
+      if (segmentsIntersect(a1, a2, b1, b2)) return true;
+    }
+  }
+  return containsPoint(a, b[0]) || containsPoint(b, a[0]);
+}
+
+function overlapsAny(setA, setB) {
+  for (const pa of setA) for (const pb of setB) if (overlaps(pa, pb)) return true;
+  return false;
+}
+
+function minSeparation(fixedPoly, moving, direction, maxDistance, tolerance) {
+  const len = Math.hypot(direction.x, direction.y);
+  const dir = { x: direction.x / len, y: direction.y / len };
+  if (!overlaps(fixedPoly, moving)) return 0;
+  let lo = 0, hi = maxDistance;
+  if (overlaps(fixedPoly, translatePoly(moving, { x: dir.x * hi, y: dir.y * hi }))) return NaN;
+  while (hi - lo > tolerance) {
+    const mid = (lo + hi) / 2;
+    if (overlaps(fixedPoly, translatePoly(moving, { x: dir.x * mid, y: dir.y * mid }))) lo = mid; else hi = mid;
+  }
+  return hi;
+}
+
+function minSeparationAny(fixedSet, movingSet, direction, maxDistance, tolerance) {
+  const len = Math.hypot(direction.x, direction.y);
+  const dir = { x: direction.x / len, y: direction.y / len };
+  if (!overlapsAny(fixedSet, movingSet)) return 0;
+  const moveAll = (t) => movingSet.map(p => translatePoly(p, { x: dir.x * t, y: dir.y * t }));
+  let lo = 0, hi = maxDistance;
+  if (overlapsAny(fixedSet, moveAll(hi))) return NaN;
+  while (hi - lo > tolerance) {
+    const mid = (lo + hi) / 2;
+    if (overlapsAny(fixedSet, moveAll(mid))) lo = mid; else hi = mid;
+  }
+  return hi;
+}
+
+function perpendicularDistance(p, a, b) {
+  const dx = b.x - a.x, dy = b.y - a.y;
+  const len = Math.hypot(dx, dy);
+  if (len < 1e-12) return dist(p, a);
+  return Math.abs((p.x - a.x) * dy - (p.y - a.y) * dx) / len;
+}
+
+function douglasPeucker(pts, epsilon) {
+  const n = pts.length;
+  if (n < 3) return pts.slice();
+  const first = pts[0], last = pts[n - 1];
+  let maxDist = -1, index = -1;
+  for (let i = 1; i < n - 1; i++) {
+    const d = perpendicularDistance(pts[i], first, last);
+    if (d > maxDist) { maxDist = d; index = i; }
+  }
+  if (maxDist > epsilon) {
+    const left = douglasPeucker(pts.slice(0, index + 1), epsilon);
+    const right = douglasPeucker(pts.slice(index), epsilon);
+    return left.slice(0, left.length - 1).concat(right);
+  }
+  return [first, last];
+}
+
+function simplifyPoly(pts, epsilon) {
+  if (pts.length <= 3) return pts;
+  return douglasPeucker(pts, epsilon);
+}
+
+function dxfNum(v) { const n = parseFloat(v); return isFinite(n) ? n : null; }
+
+function parseAsciiDxf(text) {
+  const lines = text.replace(/\r/g, '').split('\n').map(l => l.trim());
+  const pairs = [];
+  for (let i = 0; i + 1 < lines.length; i += 2) pairs.push({ code: parseInt(lines[i], 10), value: lines[i + 1] });
+
+  let unitFactor = 1;
+  for (let i = 0; i < pairs.length - 1; i++) {
+    if (pairs[i].code === 9 && pairs[i].value === '$INSUNITS' && pairs[i + 1].code === 70) {
+      const u = parseInt(pairs[i + 1].value, 10);
+      unitFactor = { 1: 25.4, 2: 304.8, 4: 1, 5: 10, 6: 1000 }[u] || 1;
+      break;
+    }
+  }
+
+  const entities = [];
+  let inEnt = false;
+  for (let i = 0; i < pairs.length;) {
+    if (pairs[i].code === 0 && pairs[i].value === 'SECTION' && pairs[i + 1] && pairs[i + 1].code === 2 && pairs[i + 1].value === 'ENTITIES') {
+      inEnt = true; i += 2; continue;
+    }
+    if (inEnt && pairs[i].code === 0 && pairs[i].value === 'ENDSEC') { inEnt = false; i++; continue; }
+    if (inEnt && pairs[i].code === 0) {
+      const type = pairs[i].value;
+      let j = i + 1;
+      const data = [];
+      while (j < pairs.length && pairs[j].code !== 0) { data.push(pairs[j]); j++; }
+      const get = (c, multi) => multi ? data.filter(p => p.code === c).map(p => p.value) : (data.find(p => p.code === c) || {}).value;
+      const num = c => dxfNum(get(c));
+      if (type === 'LINE') {
+        const x1 = num(10), y1 = num(20), x2 = num(11), y2 = num(21);
+        if ([x1, y1, x2, y2].every(v => v !== null)) {
+          entities.push({ type, x1: x1 * unitFactor, y1: y1 * unitFactor, x2: x2 * unitFactor, y2: y2 * unitFactor });
+        }
+      } else if (type === 'LWPOLYLINE') {
+        const xs = get(10, true), ys = get(20, true);
+        const pts = [];
+        for (let k = 0; k < Math.min(xs.length, ys.length); k++) {
+          const x = dxfNum(xs[k]), y = dxfNum(ys[k]);
+          if (x !== null && y !== null) pts.push({ x: x * unitFactor, y: y * unitFactor });
+        }
+        if (pts.length >= 2) {
+          const flag = parseInt(get(70) || '0', 10);
+          entities.push({ type: 'POLY', points: pts, closed: !!(flag & 1) });
+        }
+      } else if (type === 'CIRCLE' || type === 'ARC') {
+        const cx = num(10), cy = num(20), r = num(40);
+        if ([cx, cy, r].every(v => v !== null)) {
+          entities.push({
+            type, cx: cx * unitFactor, cy: cy * unitFactor, r: r * unitFactor,
+            start: dxfNum(get(50)) ?? 0, end: dxfNum(get(51)) ?? 360
+          });
+        }
+      }
+      i = j; continue;
+    }
+    i++;
+  }
+  return entities;
+}
+
+function sampleEntity(e) {
+  const pts = [];
+  if (e.type === 'LINE') {
+    pts.push({ x: e.x1, y: e.y1 }, { x: e.x2, y: e.y2 });
+  } else if (e.type === 'POLY') {
+    pts.push(...e.points);
+    if (e.closed && e.points.length) pts.push(e.points[0]);
+  } else if (e.type === 'CIRCLE') {
+    for (let i = 0; i <= 144; i++) {
+      const a = 2 * Math.PI * i / 144;
+      pts.push({ x: e.cx + e.r * Math.cos(a), y: e.cy + e.r * Math.sin(a) });
+    }
+  } else if (e.type === 'ARC') {
+    let sweep = e.end - e.start;
+    if (sweep <= 0) sweep += 360;
+    const steps = Math.max(2, Math.ceil(Math.abs(sweep) * 2));
+    for (let k = 0; k <= steps; k++) {
+      const a = (e.start + sweep * k / steps) * Math.PI / 180;
+      pts.push({ x: e.cx + e.r * Math.cos(a), y: e.cy + e.r * Math.sin(a) });
+    }
+  }
+  return pts;
+}
+
+function near(a, b) { return dist(a, b) <= 1e-3; }
+
+function chainIntoLoops(edges) {
+  const remaining = edges.slice();
+  const loops = [];
+  while (remaining.length) {
+    const first = remaining.shift();
+    let loop = first.slice();
+    let loopStart = first[0], current = first[first.length - 1];
+    let progressed = true;
+    while (progressed && !near(current, loopStart)) {
+      progressed = false;
+      for (let j = 0; j < remaining.length; j++) {
+        const pts = remaining[j];
+        const s = pts[0], e = pts[pts.length - 1];
+        if (near(s, current)) { loop = loop.concat(pts.slice(1)); current = e; remaining.splice(j, 1); progressed = true; break; }
+        if (near(e, current)) { loop = loop.concat(pts.slice(0, -1).reverse()); current = s; remaining.splice(j, 1); progressed = true; break; }
+      }
+    }
+    loops.push(loop);
+  }
+  return loops;
+}
+
+function parseDxfToPiece(text) {
+  const entities = parseAsciiDxf(text);
+  const edges = entities.map(sampleEntity).filter(pts => pts.length >= 2);
+  const loops = chainIntoLoops(edges);
+  let outer = null, bestArea = -1;
+  for (const loop of loops) {
+    const a = Math.abs(polygonArea(loop));
+    if (a > bestArea) { bestArea = a; outer = loop; }
+  }
+  const holes = loops.filter(l => l !== outer);
+  return { outer, holes };
+}
+
+function materialize(base, baseCentroid, inst) {
+  const rad = inst.rotationDeg * Math.PI / 180;
+  const cos = Math.cos(rad), sin = Math.sin(rad);
+  return base.map(p => {
+    let x = p.x - baseCentroid.x, y = p.y - baseCentroid.y;
+    if (inst.mirror) y = -y;
+    const xr = x * cos - y * sin, yr = x * sin + y * cos;
+    return { x: baseCentroid.x + xr + inst.translation.x, y: baseCentroid.y + yr + inst.translation.y };
+  });
+}
+
+function angularDiff(a, b) { const d = Math.abs(a - b) % 360; return d > 180 ? 360 - d : d; }
+
+function vecFromLenAng(len, angDeg) {
+  const rad = angDeg * Math.PI / 180;
+  return { x: len * Math.cos(rad), y: len * Math.sin(rad) };
+}
+
+function overlapsAt(cell, offset) {
+  const moved = cell.map(p => translatePoly(p, offset));
+  return overlapsAny(cell, moved);
+}
+
+function diagonalNeighborsValid(cell, v1, v2) {
+  const sum = { x: v1.x + v2.x, y: v1.y + v2.y };
+  const diff = { x: v1.x - v2.x, y: v1.y - v2.y };
+  return !overlapsAt(cell, sum) && !overlapsAt(cell, diff);
+}
+
+function findLattice(cell, gapMm, angleStepDeg, maxDistance, tolerance) {
+  const steps = Math.round(360 / angleStepDeg);
+  const distArr = new Array(steps);
+  for (let i = 0; i < steps; i++) {
+    const rad = i * angleStepDeg * Math.PI / 180;
+    const dir = { x: Math.cos(rad), y: Math.sin(rad) };
+    const d = minSeparationAny(cell, cell, dir, maxDistance, tolerance);
+    distArr[i] = (isNaN(d) || d <= 0) ? Infinity : d;
+  }
+  let i1 = -1;
+  for (let i = 0; i < steps; i++) if (i1 < 0 || distArr[i] < distArr[i1]) i1 = i;
+  if (i1 < 0 || !isFinite(distArr[i1])) return null;
+  const deg1 = i1 * angleStepDeg;
+  const v1 = vecFromLenAng(distArr[i1] + gapMm, deg1);
+
+  let i2 = -1, bestCross = Infinity, bestV2 = null;
+  const minSep = 15;
+  for (let i = 0; i < steps; i++) {
+    if (!isFinite(distArr[i])) continue;
+    const deg = i * angleStepDeg;
+    const diff = angularDiff(deg, deg1);
+    if (diff < minSep || diff > 180 - minSep) continue;
+    const cand = vecFromLenAng(distArr[i] + gapMm, deg);
+    const cr = Math.abs(v1.x * cand.y - v1.y * cand.x);
+    if (cr >= bestCross) continue;
+    if (!diagonalNeighborsValid(cell, v1, cand)) continue;
+    bestCross = cr; i2 = i; bestV2 = cand;
+  }
+  if (i2 < 0) return null;
+  return { v1, v2: bestV2, cellAreaMm2: Math.abs(v1.x * bestV2.y - v1.y * bestV2.x) };
+}
+
+function singleOrientationGenerator(piece, centroidPt) {
+  const ranked = [];
+  for (let theta = 0; theta < 180; theta += 5) {
+    const rotated = materialize(piece, centroidPt, { mirror: false, rotationDeg: theta, translation: { x: 0, y: 0 } });
+    const d = minSeparation(rotated, rotated, { x: 1, y: 0 }, 3000, 0.1);
+    if (!isNaN(d) && d > 0) ranked.push([theta, d]);
+  }
+  ranked.sort((a, b) => a[1] - b[1]);
+  return ranked.slice(0, 5).map(([theta]) => [{ mirror: false, rotationDeg: theta, translation: { x: 0, y: 0 } }]);
+}
+
+function bestContactDistance(a, b, dirStepDeg) {
+  let best = Infinity;
+  for (let deg = 0; deg < 360; deg += dirStepDeg) {
+    const rad = deg * Math.PI / 180;
+    const d = minSeparation(a, b, { x: Math.cos(rad), y: Math.sin(rad) }, 3000, 0.1);
+    if (!isNaN(d) && d < best) best = d;
+  }
+  return best;
+}
+
+function bestContactVector(a, b, dirStepDeg, gapMm) {
+  let bestD = Infinity, bestDeg = 0;
+  const eps = 0.05;
+  for (let deg = 0; deg < 360; deg += dirStepDeg) {
+    const rad = deg * Math.PI / 180;
+    const d = minSeparation(a, b, { x: Math.cos(rad), y: Math.sin(rad) }, 3000, 0.05);
+    if (!isNaN(d) && d >= eps && d < bestD) { bestD = d; bestDeg = deg; }
+  }
+  if (bestD === Infinity) return null;
+  const total = bestD + gapMm;
+  const rad = bestDeg * Math.PI / 180;
+  return { x: total * Math.cos(rad), y: total * Math.sin(rad) };
+}
+
+function centroidPairGenerator(piece, centroidPt, gapMm) {
+  const pieceA = materialize(piece, centroidPt, { mirror: false, rotationDeg: 0, translation: { x: 0, y: 0 } });
+  const ranked = [];
+  const eps = 0.05;
+  for (let theta = 0; theta < 180; theta += 5) {
+    for (let m = 0; m <= 1; m++) {
+      const mirror = m === 1;
+      const pieceB = materialize(piece, centroidPt, { mirror, rotationDeg: theta + 180, translation: { x: 0, y: 0 } });
+      const bestD = bestContactDistance(pieceA, pieceB, 6);
+      if (bestD < Infinity && bestD >= eps) ranked.push([theta, m, bestD]);
+    }
+  }
+  ranked.sort((a, b) => a[2] - b[2]);
+  const out = [];
+  for (const [theta, m] of ranked.slice(0, 6)) {
+    const mirror = m === 1;
+    const pieceB = materialize(piece, centroidPt, { mirror, rotationDeg: theta + 180, translation: { x: 0, y: 0 } });
+    const vec = bestContactVector(pieceA, pieceB, 2, gapMm);
+    if (!vec) continue;
+    out.push([
+      { mirror: false, rotationDeg: 0, translation: { x: 0, y: 0 } },
+      { mirror, rotationDeg: theta + 180, translation: vec }
+    ]);
+  }
+  return out;
+}
+
+function edgeGluePairGenerator(piece, centroidPt, gapMm, minEdgeLengthMm) {
+  const out = [];
+  const pieceA = materialize(piece, centroidPt, { mirror: false, rotationDeg: 0, translation: { x: 0, y: 0 } });
+  const n = piece.length;
+  for (let i = 0; i < n; i++) {
+    const a = piece[i], b = piece[(i + 1) % n];
+    const len = dist(a, b);
+    if (len < minEdgeLengthMm) continue;
+    const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const edgeLen = Math.hypot(dx, dy);
+    let nx = dy / edgeLen, ny = -dx / edgeLen;
+    const dot = (mid.x - centroidPt.x) * nx + (mid.y - centroidPt.y) * ny;
+    if (dot < 0) { nx = -nx; ny = -ny; }
+    const tx = 2 * (mid.x - centroidPt.x) + nx * gapMm;
+    const ty = 2 * (mid.y - centroidPt.y) + ny * gapMm;
+    const candidate = { mirror: false, rotationDeg: 180, translation: { x: tx, y: ty } };
+    const pieceB = materialize(piece, centroidPt, candidate);
+    if (!overlaps(pieceA, pieceB)) {
+      out.push([{ mirror: false, rotationDeg: 0, translation: { x: 0, y: 0 } }, candidate]);
+    }
+  }
+  return out;
+}
+
+function selectStrategy(fullOuter, gapMm) {
+  const simplified = simplifyPoly(fullOuter, 0.4);
+  const centroidPt = centroid(simplified);
+
+  const generators = [
+    ['orientacao-unica', () => singleOrientationGenerator(simplified, centroidPt)],
+    ['interlock-centroide', () => centroidPairGenerator(simplified, centroidPt, gapMm)],
+    ['cola-por-aresta', () => edgeGluePairGenerator(simplified, centroidPt, gapMm, 15)],
+  ];
+
+  const all = [];
+  for (const [name, gen] of generators) {
+    for (const cellInstances of gen()) {
+      const materialized = cellInstances.map(inst => materialize(simplified, centroidPt, inst));
+      let usesMirror = cellInstances.some(i => i.mirror);
+      const lat = findLattice(materialized, gapMm, 4, 4000, 0.15);
+      if (!lat || lat.cellAreaMm2 <= 0) continue;
+      const areaPerPiece = lat.cellAreaMm2 / cellInstances.length;
+      all.push({ strategyName: name, cellInstances, v1: lat.v1, v2: lat.v2, areaPerPieceMm2Gross: areaPerPiece, usesMirror });
+    }
+  }
+  all.sort((a, b) => a.areaPerPieceMm2Gross - b.areaPerPieceMm2Gross);
+  const bestOverall = all[0] || null;
+  const bestNoMirror = all.find(r => !r.usesMirror) || null;
+  return { all, bestOverall, bestNoMirror };
+}
+
+function snapToAxisDelta(angDeg) {
+  const mod90 = ((angDeg % 90) + 90) % 90;
+  return mod90 > 45 ? 90 - mod90 : -mod90;
+}
+
+function rotateVec(v, angDeg) { return rotatePoint(v, angDeg, { x: 0, y: 0 }); }
+
+function packSheet(fullOuter, holes, sheetW, sheetH, marginMm, gapMm) {
+  const sel = selectStrategy(fullOuter, gapMm);
+  const recipe = sel.bestNoMirror;
+  if (!recipe) return { placements: [], strategyName: 'nenhuma', alignmentDeltaDeg: 0, usedAreaMm2: 0, sel };
+
+  let areaLiquidaPeca = Math.abs(polygonArea(fullOuter));
+  for (const h of holes) areaLiquidaPeca -= Math.abs(polygonArea(h));
+
+  const centroidPt = centroid(fullOuter);
+  const v1 = recipe.v1, v2 = recipe.v2;
+  const longer = Math.hypot(v1.x, v1.y) >= Math.hypot(v2.x, v2.y) ? v1 : v2;
+  const delta = snapToAxisDelta(Math.atan2(longer.y, longer.x) * 180 / Math.PI);
+
+  const alignedCell = recipe.cellInstances.map(inst => ({
+    mirror: inst.mirror,
+    rotationDeg: inst.rotationDeg + delta,
+    translation: rotateVec(inst.translation, delta)
+  }));
+  const av1 = rotateVec(v1, delta), av2 = rotateVec(v2, delta);
+
+  let minX = Infinity, minY = Infinity;
+  for (const inst of alignedCell) {
+    const poly = materialize(fullOuter, centroidPt, inst);
+    const bb = boundingBox(poly);
+    minX = Math.min(minX, bb[0]); minY = Math.min(minY, bb[1]);
+  }
+
+  const usableW = sheetW - 2 * marginMm, usableH = sheetH - 2 * marginMm;
+  if (usableW <= 0 || usableH <= 0) return { placements: [], strategyName: recipe.strategyName, alignmentDeltaDeg: delta, usedAreaMm2: 0, sel };
+
+  const shiftX = marginMm - minX, shiftY = marginMm - minY;
+  const diag = Math.hypot(usableW, usableH);
+  const rangeN = Math.ceil(diag / Math.max(1, Math.hypot(av1.x, av1.y))) + 2;
+  const rangeM = Math.ceil(diag / Math.max(1, Math.hypot(av2.x, av2.y))) + 2;
+
+  const accepted = [];
+  const acceptedPolys = [];
+
+  for (let n = -rangeN; n <= rangeN; n++) {
+    for (let m = -rangeM; m <= rangeM; m++) {
+      const ox = shiftX + n * av1.x + m * av2.x;
+      const oy = shiftY + n * av1.y + m * av2.y;
+      for (const inst of alignedCell) {
+        const pos = { x: inst.translation.x + ox, y: inst.translation.y + oy };
+        const candidate = { mirror: inst.mirror, rotationDeg: inst.rotationDeg, translation: pos };
+        const poly = materialize(fullOuter, centroidPt, candidate);
+        const bb = boundingBox(poly);
+        if (bb[0] < marginMm - 1e-6 || bb[1] < marginMm - 1e-6 || bb[2] > sheetW - marginMm + 1e-6 || bb[3] > sheetH - marginMm + 1e-6) continue;
+        let collide = false;
+        for (const other of acceptedPolys) { if (overlaps(poly, other)) { collide = true; break; } }
+        if (collide) continue;
+        accepted.push(candidate);
+        acceptedPolys.push(poly);
+      }
+    }
+  }
+
+  return { placements: accepted, strategyName: recipe.strategyName, alignmentDeltaDeg: delta, usedAreaMm2: accepted.length * areaLiquidaPeca, areaLiquidaPeca, sel };
+}
+
+/* ===================== UI ===================== */
+
+const EXAMPLE_TRAP = "  0\nSECTION\n  2\nENTITIES\n  0\nLINE\n  8\n0\n 10\n158.500000\n 20\n1000.000366\n 11\n58.500122\n 21\n1000.000366\n  0\nLINE\n  8\n0\n 10\n58.500122\n 20\n1000.000366\n 11\n0.000122\n 21\n0.000122\n  0\nLINE\n  8\n0\n 10\n0.000122\n 20\n0.000122\n 11\n217.000122\n 21\n0.000122\n  0\nLINE\n  8\n0\n 10\n217.000122\n 20\n0.000122\n 11\n158.500000\n 21\n1000.000366\n  0\nENDSEC\n  0\nEOF\n";
+const EXAMPLE_BRACKET = "  0\nSECTION\n  2\nENTITIES\n  0\nLINE\n  8\n0\n 10\n44.896179\n 20\n55.971130\n 11\n45.686157\n 21\n50.882141\n  0\nLINE\n  8\n0\n 10\n45.686157\n 20\n50.882141\n 11\n39.757141\n 21\n49.962158\n  0\nLINE\n  8\n0\n 10\n39.757141\n 20\n49.962158\n 11\n40.523132\n 21\n45.021179\n  0\nLINE\n  8\n0\n 10\n40.523132\n 20\n45.021179\n 11\n30.500183\n 21\n43.466125\n  0\nARC\n  8\n0\n 10\n31.242126\n 20\n38.672119\n 40\n4.851080\n 50\n98.797569\n 51\n188.797653\n  0\nLINE\n  8\n0\n 10\n26.448151\n 20\n37.930176\n 11\n26.754120\n 21\n35.953125\n  0\nARC\n  8\n0\n 10\n16.725159\n 20\n34.397095\n 40\n10.148955\n 50\n278.819244\n 51\n8.819331\n  0\nLINE\n  8\n0\n 10\n18.281158\n 20\n24.368164\n 11\n16.305145\n 21\n24.062134\n  0\nARC\n  8\n0\n 10\n17.048645\n 20\n19.269653\n 40\n4.849811\n 50\n98.818504\n 51\n188.818588\n  0\nLINE\n  8\n0\n 10\n12.256134\n 20\n18.526123\n 11\n13.811127\n 21\n8.496155\n  0\nLINE\n  8\n0\n 10\n13.811127\n 20\n8.496155\n 11\n8.870117\n 21\n7.730164\n  0\nLINE\n  8\n0\n 10\n8.870117\n 20\n7.730164\n 11\n9.943146\n 21\n0.813171\n  0\nLINE\n  8\n0\n 10\n9.943146\n 20\n0.813171\n 11\n4.706146\n 21\n0.000122\n  0\nLINE\n  8\n0\n 10\n4.706146\n 20\n0.000122\n 11\n0.238129\n 21\n28.805176\n  0\nARC\n  8\n0\n 10\n20.150116\n 20\n31.893188\n 40\n20.150013\n 50\n98.815308\n 51\n188.815384\n  0\nLINE\n  8\n0\n 10\n17.062164\n 20\n51.805176\n 11\n44.873169\n 21\n56.119141\n  0\nLINE\n  8\n0\n 10\n44.873169\n 20\n56.119141\n 11\n44.896179\n 21\n55.971130\n  0\nARC\n  8\n0\n 10\n15.013702\n 20\n35.650085\n 40\n4.974870\n 50\n323.817932\n 51\n98.817345\n  0\nARC\n  8\n0\n 10\n15.013611\n 20\n35.650513\n 40\n4.975208\n 50\n188.814972\n 51\n323.814392\n  0\nARC\n  8\n0\n 10\n15.013153\n 20\n35.650146\n 40\n4.974725\n 50\n98.811127\n 51\n188.811203\n  0\nARC\n  8\n0\n 10\n7.592163\n 20\n11.731384\n 40\n2.500277\n 50\n323.812927\n 51\n98.812042\n  0\nARC\n  8\n0\n 10\n7.592499\n 20\n11.731140\n 40\n2.499897\n 50\n188.813385\n 51\n323.812500\n  0\nARC\n  8\n0\n 10\n7.592621\n 20\n11.731628\n 40\n2.500076\n 50\n98.823296\n 51\n188.823380\n  0\nARC\n  8\n0\n 10\n35.556274\n 20\n49.968384\n 40\n2.500291\n 50\n323.811859\n 51\n98.814117\n  0\nARC\n  8\n0\n 10\n35.556519\n 20\n49.968079\n 40\n2.499861\n 50\n188.811371\n 51\n323.813629\n  0\nARC\n  8\n0\n 10\n35.556641\n 20\n49.968689\n 40\n2.500055\n 50\n98.824783\n 51\n188.824875\n  0\nENDSEC\n  0\nEOF\n";
+
+let currentPiece = null;
+let currentName = '';
+
+const dropzone = document.getElementById('dropzone');
+const fileInput = document.getElementById('fileInput');
+const pieceReadout = document.getElementById('pieceReadout');
+const runBtn = document.getElementById('runBtn');
+const viewport = document.getElementById('viewport');
+const loadingOverlay = document.getElementById('loadingOverlay');
+const resultPanel = document.getElementById('resultPanel');
+
+function loadPieceText(text, name) {
+  try {
+    const piece = parseDxfToPiece(text);
+    if (!piece.outer || piece.outer.length < 3) throw new Error('contorno externo nao encontrado');
+    currentPiece = piece;
+    currentName = name;
+    const area = Math.abs(polygonArea(piece.outer));
+    const bb = boundingBox(piece.outer);
+    let liquida = area;
+    for (const h of piece.holes) liquida -= Math.abs(polygonArea(h));
+    pieceReadout.innerHTML =
+      `<div class="row"><span>peça</span><b>${name}</b></div>` +
+      `<div class="row"><span>bbox</span><b>${(bb[2]-bb[0]).toFixed(1)} × ${(bb[3]-bb[1]).toFixed(1)} mm</b></div>` +
+      `<div class="row"><span>área líquida</span><b>${liquida.toFixed(1)} mm²</b></div>` +
+      `<div class="row"><span>furos</span><b>${piece.holes.length}</b></div>`;
+    pieceReadout.classList.add('show');
+    runBtn.disabled = false;
+    runBtn.textContent = 'Empacotar';
+    document.getElementById('engineStatus').textContent = 'peça carregada';
+  } catch (err) {
+    alert('Não consegui ler esse DXF: ' + err.message);
+  }
+}
+
+dropzone.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', () => {
+  const f = fileInput.files[0];
+  if (!f) return;
+  const reader = new FileReader();
+  reader.onload = () => loadPieceText(reader.result, f.name);
+  reader.readAsText(f);
+});
+['dragover', 'dragleave', 'drop'].forEach(evt => {
+  dropzone.addEventListener(evt, e => {
+    e.preventDefault();
+    dropzone.classList.toggle('drag', evt === 'dragover');
+    if (evt === 'drop' && e.dataTransfer.files[0]) {
+      const f = e.dataTransfer.files[0];
+      const reader = new FileReader();
+      reader.onload = () => loadPieceText(reader.result, f.name);
+      reader.readAsText(f);
+    }
+  });
+});
+
+document.getElementById('loadTrap').addEventListener('click', () => {
+  loadPieceText(EXAMPLE_TRAP, 'TRAP.DXF (trapézio)');
+  document.getElementById('sheetW').value = 1200;
+  document.getElementById('sheetH').value = 2200;
+  document.getElementById('margin').value = 5;
+  document.getElementById('gap').value = 3;
+});
+document.getElementById('loadBracket').addEventListener('click', () => {
+  loadPieceText(EXAMPLE_BRACKET, 'BRACKET_COMPACTO.DXF');
+  document.getElementById('sheetW').value = 914;
+  document.getElementById('sheetH').value = 1010;
+  document.getElementById('margin').value = 3;
+  document.getElementById('gap').value = 2;
+});
+
+function renderSVG(piece, result, sheetW, sheetH, margin) {
+  const cen = centroid(piece.outer);
+  let svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${sheetW} ${sheetH}" preserveAspectRatio="xMidYMid meet">`;
+  svg += `<rect x="0" y="0" width="${sheetW}" height="${sheetH}" fill="#0a141c"/>`;
+  svg += `<rect x="${margin}" y="${margin}" width="${sheetW-2*margin}" height="${sheetH-2*margin}" fill="none" stroke="#2b5266" stroke-width="${Math.max(sheetW,sheetH)/500}" stroke-dasharray="${Math.max(sheetW,sheetH)/150},${Math.max(sheetW,sheetH)/220}"/>`;
+  const outerSimplified = simplifyPoly(piece.outer, Math.max(0.3, Math.max(sheetW,sheetH)/2000));
+  const sw = Math.max(sheetW, sheetH) / 700;
+  for (const p of result.placements) {
+    const poly = materialize(outerSimplified, cen, p);
+    svg += `<polygon points="${poly.map(pt => pt.x.toFixed(2)+','+(sheetH-pt.y).toFixed(2)).join(' ')}" fill="#ffb45455" stroke="#ffb454" stroke-width="${sw}"/>`;
+  }
+  svg += `</svg>`;
+  viewport.innerHTML = '';
+  viewport.insertAdjacentHTML('beforeend', svg);
+  const ov = document.createElement('div');
+  ov.className = 'loading'; ov.id = 'loadingOverlay';
+  viewport.appendChild(ov);
+}
+
+function renderRankTable(sel) {
+  const table = document.getElementById('rankTable');
+  const winner = sel.bestNoMirror;
+  let html = '<tr><th>estratégia</th><th>mm²/peça</th></tr>';
+  for (const r of sel.all.slice(0, 5)) {
+    const isWinner = r === winner;
+    html += `<tr class="${isWinner ? 'winner' : ''}"><td class="name">${r.strategyName}${r.usesMirror ? '<span class="mirror-tag">espelho</span>' : ''}</td><td>${r.areaPerPieceMm2Gross.toFixed(1)}</td></tr>`;
+  }
+  table.innerHTML = html;
+
+  const mirrorNote = document.getElementById('mirrorNote');
+  if (sel.bestOverall && sel.bestOverall.usesMirror && sel.bestOverall !== winner) {
+    mirrorNote.innerHTML = '⚠ existe candidato com <b>espelho</b> melhor que o vencedor — não aplicado automaticamente, precisa de autorização.';
+  } else {
+    mirrorNote.textContent = '';
+  }
+}
+
+runBtn.addEventListener('click', () => {
+  if (!currentPiece) return;
+  const sheetW = parseFloat(document.getElementById('sheetW').value);
+  const sheetH = parseFloat(document.getElementById('sheetH').value);
+  const margin = parseFloat(document.getElementById('margin').value);
+  const gap = parseFloat(document.getElementById('gap').value);
+
+  runBtn.disabled = true;
+  runBtn.textContent = 'Calculando…';
+  document.getElementById('engineStatus').textContent = 'processando';
+  let overlay = document.getElementById('loadingOverlay');
+  if (overlay) overlay.classList.add('show');
+
+  setTimeout(() => {
+    const t0 = performance.now();
+    const result = packSheet(currentPiece.outer, currentPiece.holes, sheetW, sheetH, margin, gap);
+    const t1 = performance.now();
+
+    renderSVG(currentPiece, result, sheetW, sheetH, margin);
+    renderRankTable(result.sel);
+
+    const usableArea = (sheetW - 2*margin) * (sheetH - 2*margin);
+    const pct = usableArea > 0 ? 100 * result.usedAreaMm2 / usableArea : 0;
+    document.getElementById('statCount').textContent = result.placements.length;
+    document.getElementById('statPct').textContent = pct.toFixed(1) + '%';
+    document.getElementById('statTime').textContent = ((t1 - t0)/1000).toFixed(1) + 's';
+    resultPanel.style.display = 'block';
+
+    runBtn.disabled = false;
+    runBtn.textContent = 'Empacotar de novo';
+    document.getElementById('engineStatus').textContent = `${result.strategyName} · ${result.placements.length} peças`;
+  }, 30);
+});
+</script>
