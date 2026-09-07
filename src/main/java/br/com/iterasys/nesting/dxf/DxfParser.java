@@ -44,10 +44,34 @@ public final class DxfParser {
     }
 
     public static PieceGeometry parse(InputStream in) throws IOException {
+        return classifyLoops(rawLoops(in));
+    }
+
+    /**
+     * Le TODOS os lacos fechados de um DXF, sem tentar separar contorno
+     * externo de furos - util para auditar um arquivo ja nesteado (varias
+     * copias de uma ou mais pecas), onde nao existe "a" peca principal.
+     * Quem chama decide como agrupar os lacos em instancias de peca (ver
+     * {@code NestedInstanceMatcher}).
+     */
+    public static List<Polygon> parseAllLoops(Path file) throws IOException {
+        try (InputStream in = Files.newInputStream(file)) {
+            return parseAllLoops(in);
+        }
+    }
+
+    public static List<Polygon> parseAllLoops(InputStream in) throws IOException {
+        List<Polygon> out = new ArrayList<>();
+        for (List<Point2D> loop : rawLoops(in)) {
+            out.add(new Polygon(loop));
+        }
+        return out;
+    }
+
+    private static List<List<Point2D>> rawLoops(InputStream in) throws IOException {
         List<String> tokens = readGroupValues(in);
         List<Edge> edges = extractEdges(tokens);
-        List<List<Point2D>> loops = chainIntoLoops(edges);
-        return classifyLoops(loops);
+        return chainIntoLoops(edges);
     }
 
     // ---- Tokenizacao bruta: pares (codigo, valor) ----
