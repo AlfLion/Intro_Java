@@ -46,7 +46,17 @@ public final class OrientationAligner {
                 maxAngDeg = Math.toDegrees(Math.atan2(b.y - a.y, b.x - a.x));
             }
         }
-        double mod90 = ((maxAngDeg % 90) + 90) % 90;
+        return snapToAxisDelta(maxAngDeg);
+    }
+
+    /**
+     * Delta (graus) que, somado a {@code angDeg}, deixa o angulo o mais
+     * proximo possivel de um eixo (0/90/180/270). Reaproveitado tanto para
+     * a aresta mais longa de um poligono quanto para o maior vetor de rede
+     * de uma receita de encaixe (ver {@code SheetPacker}).
+     */
+    public static double snapToAxisDelta(double angDeg) {
+        double mod90 = ((angDeg % 90) + 90) % 90;
         return mod90 > 45 ? 90 - mod90 : -mod90;
     }
 }
