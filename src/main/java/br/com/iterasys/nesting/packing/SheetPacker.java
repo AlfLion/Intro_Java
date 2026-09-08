@@ -37,9 +37,15 @@ import java.util.List;
  * retangulo - fica pra uma proxima iteracao se a diferenca de aproveitamento
  * justificar o esforco.
  *
+ * {@link #packBestOrientation} testa a chapa deitada E em pe (WxH e HxW) e
+ * fica com a que render mais pecas - a mesma decisao que o usuario tomou
+ * manualmente entre o Layout A (1095x914, 106 pecas) e o Layout C (914x1095,
+ * 98 pecas) da 15746A: mesma chapa fisica, orientacao diferente, resultado
+ * diferente porque a receita de encaixe nao e simetrica em relacao a troca
+ * de eixos.
+ *
  * Ainda nao inclui: aproveitamento de vaos (peca pequena no espaco que
- * sobra dentro do encaixe, tipo ENCAKIT), nem escolher entre multiplas
- * orientacoes de chapa (deitada/em pe) - fica para as proximas etapas.
+ * sobra dentro do encaixe, tipo ENCAKIT) - fica para as proximas etapas.
  */
 public final class SheetPacker {
 
@@ -66,9 +72,12 @@ public final class SheetPacker {
         public final double usedAreaMm2;
         public final int primaryCount;
         public final int reuseCount;
+        public final double sheetWidthMm;
+        public final double sheetHeightMm;
 
         Result(List<Placement> placements, String strategyName, double alignmentDeltaDeg,
-               double sheetAreaMm2, double piecesNetAreaMm2, int primaryCount, int reuseCount) {
+               double sheetAreaMm2, double piecesNetAreaMm2, int primaryCount, int reuseCount,
+               double sheetWidthMm, double sheetHeightMm) {
             this.placements = placements;
             this.strategyName = strategyName;
             this.alignmentDeltaDeg = alignmentDeltaDeg;
@@ -77,6 +86,8 @@ public final class SheetPacker {
             this.usedAreaMm2 = placements.size() * piecesNetAreaMm2;
             this.primaryCount = primaryCount;
             this.reuseCount = reuseCount;
+            this.sheetWidthMm = sheetWidthMm;
+            this.sheetHeightMm = sheetHeightMm;
         }
     }
 
@@ -88,7 +99,7 @@ public final class SheetPacker {
         StrategySelector.Result sel = StrategySelector.select(fullOuter, gapMm);
         NestingRecipe recipe = sel.bestNoMirror;
         if (recipe == null) {
-            return new Result(List.of(), "nenhuma", 0, sheetW * sheetH, 0, 0, 0);
+            return new Result(List.of(), "nenhuma", 0, sheetW * sheetH, 0, 0, 0, sheetW, sheetH);
         }
 
         double areaLiquidaPeca = Math.abs(fullOuter.area());
@@ -109,7 +120,7 @@ public final class SheetPacker {
         double usableMinX = marginMm, usableMinY = marginMm;
         double usableMaxX = sheetW - marginMm, usableMaxY = sheetH - marginMm;
         if (usableMaxX <= usableMinX || usableMaxY <= usableMinY) {
-            return new Result(List.of(), recipe.strategyName, delta, sheetW * sheetH, areaLiquidaPeca, 0, 0);
+            return new Result(List.of(), recipe.strategyName, delta, sheetW * sheetH, areaLiquidaPeca, 0, 0, sheetW, sheetH);
         }
 
         List<Placement> accepted = new ArrayList<>();
@@ -132,7 +143,24 @@ public final class SheetPacker {
                 usableMinX, used[1], usableMaxX, usableMaxY, accepted, acceptedPolys);
 
         int reuseCount = accepted.size() - primaryCount;
-        return new Result(accepted, recipe.strategyName, delta, sheetW * sheetH, areaLiquidaPeca, primaryCount, reuseCount);
+        return new Result(accepted, recipe.strategyName, delta, sheetW * sheetH, areaLiquidaPeca,
+                primaryCount, reuseCount, sheetW, sheetH);
+    }
+
+    /**
+     * Testa a chapa deitada e em pe (WxH e HxW) e fica com a que render
+     * mais pecas - a mesma escolha que o usuario fez manualmente entre o
+     * Layout A (1095x914, 106 pecas) e o Layout C (914x1095, 98 pecas) da
+     * 15746A. Se W e H forem iguais (chapa quadrada), so roda uma vez.
+     */
+    public static Result packBestOrientation(Polygon fullOuter, List<Polygon> holes,
+                                              double sheetW, double sheetH, double marginMm, double gapMm) {
+        Result deitada = pack(fullOuter, holes, sheetW, sheetH, marginMm, gapMm);
+        if (Math.abs(sheetW - sheetH) < 1e-9) {
+            return deitada;
+        }
+        Result emPe = pack(fullOuter, holes, sheetH, sheetW, marginMm, gapMm);
+        return emPe.placements.size() > deitada.placements.size() ? emPe : deitada;
     }
 
     /** [maxX, maxY] ocupados ate agora (ao menos o minimo util, se nada foi aceito). */
