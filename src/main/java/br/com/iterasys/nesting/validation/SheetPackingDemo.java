@@ -26,15 +26,22 @@ import java.util.List;
  * coluna/fileira nao fecha inteira) - nao e uma propriedade fixa da peca
  * sozinha. Confirmado empiricamente: o TRAP.DXF chega a ~98% numa celula
  * isolada, mas so ~61-72% numa chapa de poucos metros porque sobra uma
- * faixa de borda que ainda nao e reaproveitada (proxima etapa do roadmap:
- * reusar a receita girada 90/180/270 nessa sobra, como no Layout C da
- * 15746A).
+ * faixa de borda.
+ *
+ * O {@code SheetPacker} agora tenta reaproveitar essa sobra com a mesma
+ * receita girada 90/180/270 (como no Layout C da 15746A) - funciona quando
+ * a sobra e uma faixa retangular limpa (testado com o TRAP.DXF numa chapa
+ * alta: +2 pecas), mas ainda nao quando o 2o vetor de rede da receita
+ * vencedora fica diagonal em vez de perpendicular ao 1o (caso do
+ * BRACKET_COMPACTO.DXF com "cola-por-aresta" - reaproveitamento fica 0,
+ * ver limitacao documentada em {@code SheetPacker}).
  */
 public final class SheetPackingDemo {
 
     public static void main(String[] args) throws IOException {
         report("/fixtures/BRACKET_COMPACTO.DXF", 914, 1010, 3, 2);
         report("/fixtures/TRAP.DXF", 1200, 2200, 5, 3);
+        report("/fixtures/TRAP.DXF", 1200, 2600, 5, 3);
     }
 
     private static void report(String resource, double sheetW, double sheetH, double marginMm, double gapMm) throws IOException {
@@ -49,8 +56,8 @@ public final class SheetPackingDemo {
         double usableArea = (sheetW - 2 * marginMm) * (sheetH - 2 * marginMm);
         System.out.printf("Tempo: %dms | estrategia: %s | alinhamento aplicado: %.2f graus%n",
                 t1 - t0, r.strategyName, r.alignmentDeltaDeg);
-        System.out.printf("Pecas encaixadas: %d | aproveitamento liquido: %.1f%%%n",
-                r.placements.size(), 100.0 * r.usedAreaMm2 / usableArea);
+        System.out.printf("Pecas encaixadas: %d (primaria=%d + reaproveitada=%d) | aproveitamento liquido: %.1f%%%n",
+                r.placements.size(), r.primaryCount, r.reuseCount, 100.0 * r.usedAreaMm2 / usableArea);
 
         Point2D centroid = GeometryOps.centroid(g.getOuter());
         List<Polygon> polys = new ArrayList<>();
