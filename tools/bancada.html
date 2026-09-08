@@ -194,8 +194,10 @@ table.rank .mirror-tag{
           <div class="stat"><div class="num" id="statPct">&mdash;</div><div class="lbl">líquido</div></div>
           <div class="stat"><div class="num" id="statTime">&mdash;</div><div class="lbl">tempo</div></div>
         </div>
+        <p class="note" id="breakdownNote" style="margin-top:8px;"></p>
         <table class="rank" id="rankTable"></table>
         <p class="note" id="mirrorNote"></p>
+        <button id="authorizeMirrorBtn" style="display:none; width:100%; margin-top:8px;">Autorizar espelhamento e refazer busca</button>
       </div>
     </div>
 
@@ -208,9 +210,11 @@ table.rank .mirror-tag{
   <p class="note">
     Motor: seleciona sozinho entre 3 mecanismos de encaixe (orientação única, interlock θ/θ+180° em torno do
     centroide, cola-por-aresta reta) medindo mm²/peça de cada um — a peça revela qual serve melhor, sem
-    classificação manual. Espelhamento nunca é aplicado automaticamente: se um candidato espelhado vencer, ele
-    aparece sinalizado na tabela, não no resultado final. Cada peça aceita é validada por colisão geométrica real
-    antes de entrar na chapa. Porte 1:1 do motor em Java (mesmos algoritmos, mesmos números) — ver
+    classificação manual. Depois da busca primária, reaproveita a mesma receita girada 90/180/270° na sobra da
+    chapa. Espelhamento nunca é aplicado automaticamente: se um candidato espelhado vencer, ele aparece sinalizado
+    com o ganho estimado e um botão pra autorizar explicitamente — sem clicar, o resultado nunca usa espelho.
+    Cada peça aceita é validada por colisão geométrica real (resolução plena) antes de entrar na chapa. Porte 1:1
+    do motor em Java (mesmos algoritmos, mesmos números, verificado via Node antes de publicar) — ver
     <span class="mono">NESTING_PRO_HANDOFF.md</span> no repositório para o código-fonte completo.
   </p>
 </div>
@@ -686,10 +690,99 @@ function snapToAxisDelta(angDeg) {
 
 function rotateVec(v, angDeg) { return rotatePoint(v, angDeg, { x: 0, y: 0 }); }
 
-function packSheet(fullOuter, holes, sheetW, sheetH, marginMm, gapMm) {
+function rotateCell(cell, deltaDeg) {
+  return cell.map(inst => ({
+    mirror: inst.mirror,
+    rotationDeg: inst.rotationDeg + deltaDeg,
+    translation: rotateVec(inst.translation, deltaDeg)
+  }));
+}
+
+// Ladrilha uma celula (com os vetores de rede ja na orientacao desejada)
+// dentro de um retangulo - mesma logica do SheetPacker.tileRegion do Java.
+// acceptedPolys ja contem o que foi aceito antes (candidatos colidem contra
+// isso tambem), accepted/acceptedPolys recebem os novos aceitos.
+function tileRegion(pieceOuter, centroidPt, cellInstances, v1, v2,
+                     regionMinX, regionMinY, regionMaxX, regionMaxY, accepted, acceptedPolys) {
+  const regionW = regionMaxX - regionMinX, regionH = regionMaxY - regionMinY;
+  if (regionW <= 0 || regionH <= 0) return;
+
+  let minX = Infinity, minY = Infinity;
+  for (const inst of cellInstances) {
+    const poly = materialize(pieceOuter, centroidPt, inst);
+    const bb = boundingBox(poly);
+    minX = Math.min(minX, bb[0]); minY = Math.min(minY, bb[1]);
+  }
+  const shiftX = regionMinX - minX, shiftY = regionMinY - minY;
+  const diag = Math.hypot(regionW, regionH);
+  const rangeN = Math.ceil(diag / Math.max(1, Math.hypot(v1.x, v1.y))) + 2;
+  const rangeM = Math.ceil(diag / Math.max(1, Math.hypot(v2.x, v2.y))) + 2;
+
+  for (let n = -rangeN; n <= rangeN; n++) {
+    for (let m = -rangeM; m <= rangeM; m++) {
+      const ox = shiftX + n * v1.x + m * v2.x;
+      const oy = shiftY + n * v1.y + m * v2.y;
+      for (const inst of cellInstances) {
+        const pos = { x: inst.translation.x + ox, y: inst.translation.y + oy };
+        const candidate = { mirror: inst.mirror, rotationDeg: inst.rotationDeg, translation: pos };
+        const poly = materialize(pieceOuter, centroidPt, candidate);
+        const bb = boundingBox(poly);
+        if (bb[0] < regionMinX - 1e-6 || bb[1] < regionMinY - 1e-6 ||
+            bb[2] > regionMaxX + 1e-6 || bb[3] > regionMaxY + 1e-6) continue;
+        let collide = false;
+        for (const other of acceptedPolys) { if (overlaps(poly, other)) { collide = true; break; } }
+        if (collide) continue;
+        accepted.push(candidate);
+        acceptedPolys.push(poly);
+      }
+    }
+  }
+}
+
+const REUSE_ROTATIONS_DEG = [90, 180, 270];
+
+// Reaproveitamento de sobra: tenta a mesma receita girada 90/180/270 na
+// area util INTEIRA de novo (nao so uma faixa calculada a partir do uso
+// primario) - a colisao real contra o que ja foi aceito rejeita sozinha
+// qualquer posicao ocupada, entao nao precisa adivinhar o formato da
+// sobra. So mantem a rotacao que render mais pecas. Mesma logica do
+// SheetPacker.tryBestRotationInRegion do Java.
+function tryBestRotationInRegion(pieceOuter, centroidPt, baseCell, baseV1, baseV2,
+                                  regionMinX, regionMinY, regionMaxX, regionMaxY, accepted, acceptedPolys) {
+  let bestNew = null, bestNewPolys = null;
+  for (const rot of REUSE_ROTATIONS_DEG) {
+    const rotCell = rotateCell(baseCell, rot);
+    const rv1 = rotateVec(baseV1, rot), rv2 = rotateVec(baseV2, rot);
+    const trialAccepted = [];
+    const trialPolys = acceptedPolys.slice();
+    const before = trialPolys.length;
+    tileRegion(pieceOuter, centroidPt, rotCell, rv1, rv2,
+        regionMinX, regionMinY, regionMaxX, regionMaxY, trialAccepted, trialPolys);
+    if (bestNew === null || trialAccepted.length > bestNew.length) {
+      bestNew = trialAccepted;
+      bestNewPolys = trialPolys.slice(before);
+    }
+  }
+  if (bestNew && bestNew.length) {
+    accepted.push(...bestNew);
+    acceptedPolys.push(...bestNewPolys);
+  }
+}
+
+// Busca completa: melhor receita (respeitando a trava de espelhamento,
+// liberada so se mirrorAuthorized=true) + alinhamento de eixo + tiling
+// primario + reaproveitamento de sobra girada + validacao final em
+// resolucao plena (nunca confia so no que a busca aceitou). Porte 1:1 do
+// SheetPacker.pack() do Java, incluindo a correcao do reaproveitamento
+// (escanear a area util inteira em vez de uma faixa retangular) e a
+// trava de espelhamento (SheetPacker.pack(..., mirrorAuthorized)).
+function packSheet(fullOuter, holes, sheetW, sheetH, marginMm, gapMm, mirrorAuthorized) {
   const sel = selectStrategy(fullOuter, gapMm);
-  const recipe = sel.bestNoMirror;
-  if (!recipe) return { placements: [], strategyName: 'nenhuma', alignmentDeltaDeg: 0, usedAreaMm2: 0, sel };
+  const recipe = (mirrorAuthorized && sel.bestOverall && sel.bestOverall.usesMirror) ? sel.bestOverall : sel.bestNoMirror;
+  const mirrorPending = !!(sel.bestOverall && sel.bestOverall.usesMirror &&
+      (!sel.bestNoMirror || sel.bestOverall.areaPerPieceMm2Gross < sel.bestNoMirror.areaPerPieceMm2Gross - 1e-6));
+  const mirrorGainPct = mirrorPending ? 100 * (sel.bestNoMirror.areaPerPieceMm2Gross - sel.bestOverall.areaPerPieceMm2Gross) / sel.bestNoMirror.areaPerPieceMm2Gross : 0;
+  if (!recipe) return { placements: [], strategyName: 'nenhuma', alignmentDeltaDeg: 0, usedAreaMm2: 0, sel, mirrorPending, mirrorGainPct, mirrorUsed: false };
 
   let areaLiquidaPeca = Math.abs(polygonArea(fullOuter));
   for (const h of holes) areaLiquidaPeca -= Math.abs(polygonArea(h));
@@ -699,51 +792,30 @@ function packSheet(fullOuter, holes, sheetW, sheetH, marginMm, gapMm) {
   const longer = Math.hypot(v1.x, v1.y) >= Math.hypot(v2.x, v2.y) ? v1 : v2;
   const delta = snapToAxisDelta(Math.atan2(longer.y, longer.x) * 180 / Math.PI);
 
-  const alignedCell = recipe.cellInstances.map(inst => ({
-    mirror: inst.mirror,
-    rotationDeg: inst.rotationDeg + delta,
-    translation: rotateVec(inst.translation, delta)
-  }));
+  const alignedCell = rotateCell(recipe.cellInstances, delta);
   const av1 = rotateVec(v1, delta), av2 = rotateVec(v2, delta);
 
-  let minX = Infinity, minY = Infinity;
-  for (const inst of alignedCell) {
-    const poly = materialize(fullOuter, centroidPt, inst);
-    const bb = boundingBox(poly);
-    minX = Math.min(minX, bb[0]); minY = Math.min(minY, bb[1]);
+  const usableMinX = marginMm, usableMinY = marginMm;
+  const usableMaxX = sheetW - marginMm, usableMaxY = sheetH - marginMm;
+  if (usableMaxX <= usableMinX || usableMaxY <= usableMinY) {
+    return { placements: [], strategyName: recipe.strategyName, alignmentDeltaDeg: delta, usedAreaMm2: 0, sel, mirrorPending, mirrorGainPct, mirrorUsed: recipe.usesMirror };
   }
-
-  const usableW = sheetW - 2 * marginMm, usableH = sheetH - 2 * marginMm;
-  if (usableW <= 0 || usableH <= 0) return { placements: [], strategyName: recipe.strategyName, alignmentDeltaDeg: delta, usedAreaMm2: 0, sel };
-
-  const shiftX = marginMm - minX, shiftY = marginMm - minY;
-  const diag = Math.hypot(usableW, usableH);
-  const rangeN = Math.ceil(diag / Math.max(1, Math.hypot(av1.x, av1.y))) + 2;
-  const rangeM = Math.ceil(diag / Math.max(1, Math.hypot(av2.x, av2.y))) + 2;
 
   const accepted = [];
   const acceptedPolys = [];
+  tileRegion(fullOuter, centroidPt, alignedCell, av1, av2,
+      usableMinX, usableMinY, usableMaxX, usableMaxY, accepted, acceptedPolys);
+  const primaryCount = accepted.length;
 
-  for (let n = -rangeN; n <= rangeN; n++) {
-    for (let m = -rangeM; m <= rangeM; m++) {
-      const ox = shiftX + n * av1.x + m * av2.x;
-      const oy = shiftY + n * av1.y + m * av2.y;
-      for (const inst of alignedCell) {
-        const pos = { x: inst.translation.x + ox, y: inst.translation.y + oy };
-        const candidate = { mirror: inst.mirror, rotationDeg: inst.rotationDeg, translation: pos };
-        const poly = materialize(fullOuter, centroidPt, candidate);
-        const bb = boundingBox(poly);
-        if (bb[0] < marginMm - 1e-6 || bb[1] < marginMm - 1e-6 || bb[2] > sheetW - marginMm + 1e-6 || bb[3] > sheetH - marginMm + 1e-6) continue;
-        let collide = false;
-        for (const other of acceptedPolys) { if (overlaps(poly, other)) { collide = true; break; } }
-        if (collide) continue;
-        accepted.push(candidate);
-        acceptedPolys.push(poly);
-      }
-    }
-  }
+  tryBestRotationInRegion(fullOuter, centroidPt, alignedCell, av1, av2,
+      usableMinX, usableMinY, usableMaxX, usableMaxY, accepted, acceptedPolys);
+  const reuseCount = accepted.length - primaryCount;
 
-  return { placements: accepted, strategyName: recipe.strategyName, alignmentDeltaDeg: delta, usedAreaMm2: accepted.length * areaLiquidaPeca, areaLiquidaPeca, sel };
+  return {
+    placements: accepted, strategyName: recipe.strategyName, alignmentDeltaDeg: delta,
+    usedAreaMm2: accepted.length * areaLiquidaPeca, areaLiquidaPeca, sel,
+    primaryCount, reuseCount, mirrorPending, mirrorGainPct, mirrorUsed: recipe.usesMirror
+  };
 }
 
 /* ===================== UI ===================== */
@@ -770,6 +842,7 @@ function loadPieceText(text, name) {
     if (!piece.outer || piece.outer.length < 3) throw new Error('contorno externo nao encontrado');
     currentPiece = piece;
     currentName = name;
+    mirrorAuthorized = false;
     const area = Math.abs(polygonArea(piece.outer));
     const bb = boundingBox(piece.outer);
     let liquida = area;
@@ -845,21 +918,23 @@ function renderSVG(piece, result, sheetW, sheetH, margin) {
   viewport.appendChild(ov);
 }
 
-function renderRankTable(sel) {
+function renderRankTable(sel, chosenRecipe, mirrorPending, mirrorGainPct) {
   const table = document.getElementById('rankTable');
-  const winner = sel.bestNoMirror;
   let html = '<tr><th>estratégia</th><th>mm²/peça</th></tr>';
   for (const r of sel.all.slice(0, 5)) {
-    const isWinner = r === winner;
+    const isWinner = r === chosenRecipe;
     html += `<tr class="${isWinner ? 'winner' : ''}"><td class="name">${r.strategyName}${r.usesMirror ? '<span class="mirror-tag">espelho</span>' : ''}</td><td>${r.areaPerPieceMm2Gross.toFixed(1)}</td></tr>`;
   }
   table.innerHTML = html;
 
   const mirrorNote = document.getElementById('mirrorNote');
-  if (sel.bestOverall && sel.bestOverall.usesMirror && sel.bestOverall !== winner) {
-    mirrorNote.innerHTML = '⚠ existe candidato com <b>espelho</b> melhor que o vencedor — não aplicado automaticamente, precisa de autorização.';
+  const authorizeBtn = document.getElementById('authorizeMirrorBtn');
+  if (mirrorPending) {
+    mirrorNote.innerHTML = `⚠ existe candidato com <b>espelho</b> que renderia +${mirrorGainPct.toFixed(1)}% peça/m² — não aplicado automaticamente. Autorize explicitamente se as peças espelhadas puderem ser fabricadas.`;
+    authorizeBtn.style.display = 'block';
   } else {
-    mirrorNote.textContent = '';
+    mirrorNote.textContent = chosenRecipe && chosenRecipe.usesMirror ? '✓ receita espelhada em uso (autorizada).' : '';
+    authorizeBtn.style.display = 'none';
   }
 }
 
@@ -899,9 +974,13 @@ estimateBtn.addEventListener('click', () => {
   }, 20);
 });
 
+let mirrorAuthorized = false;
+
 // Passo 2: busca completa de verdade (so roda quando o usuario clica aqui,
-// depois de ver a previa) - desenha as posicoes reais em SVG.
-runBtn.addEventListener('click', () => {
+// depois de ver a previa) - desenha as posicoes reais em SVG. Por padrao
+// NUNCA autoriza espelho (mirrorAuthorized so vira true se o usuario clicar
+// no botao de autorizacao explicita, depois de ver o ganho sinalizado).
+function runFullSearch() {
   if (!currentPiece) return;
   const sheetW = parseFloat(document.getElementById('sheetW').value);
   const sheetH = parseFloat(document.getElementById('sheetH').value);
@@ -916,22 +995,35 @@ runBtn.addEventListener('click', () => {
 
   setTimeout(() => {
     const t0 = performance.now();
-    const result = packSheet(currentPiece.outer, currentPiece.holes, sheetW, sheetH, margin, gap);
+    const result = packSheet(currentPiece.outer, currentPiece.holes, sheetW, sheetH, margin, gap, mirrorAuthorized);
     const t1 = performance.now();
 
     renderSVG(currentPiece, result, sheetW, sheetH, margin);
-    renderRankTable(result.sel);
+    renderRankTable(result.sel, result.sel.all.find(r => r.strategyName === result.strategyName && r.usesMirror === result.mirrorUsed) || null, result.mirrorPending, result.mirrorGainPct);
 
     const usableArea = (sheetW - 2*margin) * (sheetH - 2*margin);
     const pct = usableArea > 0 ? 100 * result.usedAreaMm2 / usableArea : 0;
+    const breakdown = (result.primaryCount !== undefined) ? `primária=${result.primaryCount} + reaproveitada=${result.reuseCount}` : '';
     document.getElementById('statCount').textContent = result.placements.length;
     document.getElementById('statPct').textContent = pct.toFixed(1) + '%';
     document.getElementById('statTime').textContent = ((t1 - t0)/1000).toFixed(1) + 's';
+    document.getElementById('breakdownNote').textContent = breakdown;
     resultPanel.style.display = 'block';
 
     runBtn.disabled = false;
     runBtn.textContent = 'Buscar de novo';
-    document.getElementById('engineStatus').textContent = `${result.strategyName} · ${result.placements.length} peças`;
+    document.getElementById('engineStatus').textContent = `${result.strategyName}${result.mirrorUsed ? ' (espelhado)' : ''} · ${result.placements.length} peças${breakdown}`;
   }, 30);
+}
+
+runBtn.addEventListener('click', () => { mirrorAuthorized = false; runFullSearch(); });
+
+// Autorizacao explicita de espelhamento: so libera a receita espelhada
+// depois que o usuario ve o ganho sinalizado e clica aqui de proposito -
+// a trava nunca aplica sozinha (mesma regra do StrategySelector/SheetPacker
+// no motor Java).
+document.getElementById('authorizeMirrorBtn').addEventListener('click', () => {
+  mirrorAuthorized = true;
+  runFullSearch();
 });
 </script>

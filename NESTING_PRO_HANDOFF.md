@@ -124,11 +124,17 @@ Em vez de um classificador que adivinha o tipo de peça, gera candidatos por
    kit ali, generalizando a lógica de "vãos" que o app Básico já tem para
    retângulo/anel simples.
 
-2. **Regra de negócio do espelhamento — falta o fluxo, não a detecção**.
-   `StrategySelector.Result.mirrorPending()` já detecta e sinaliza quando
-   um candidato espelhado é melhor. Falta decidir e construir a UX real de
-   "pedir autorização" (hoje quem chama sempre usa `bestNoMirror`
-   silenciosamente).
+2. ~~Regra de negócio do espelhamento — falta o fluxo, não a detecção~~
+   **FEITO no motor e na bancada**: `StrategySelector.Result.chosen(mirrorAuthorized)`
+   + `mirrorGainPct()` (Java) e o equivalente em `packSheet(...,
+   mirrorAuthorized)` (JS) — sem autorização explícita sempre usa a receita
+   sem espelho; `SheetPacker.pack/estimate/packBestOrientation` ganharam
+   sobrecarga com esse parâmetro. Na bancada.html já existe um botão real
+   "Autorizar espelhamento e refazer busca" que só aparece quando
+   `mirrorPending=true`. Falta só: nenhuma peça real testada até agora
+   dispara `mirrorPending=true` (ver item 3), então o caminho autorizado
+   nunca foi validado contra geometria real — só contra 9 casos sintéticos
+   (Java) + os mesmos 9 replicados em JS, todos passando.
 
 3. **Peça com furo interno de verdade (part-in-part)**. Nenhum exemplo do
    usuário até agora tinha um furo grande o bastante pra caber outra peça
@@ -148,14 +154,16 @@ Em vez de um classificador que adivinha o tipo de peça, gera candidatos por
    nem combinar materiais (o "modo conjugado" que o app Básico já tem pra
    Retângulo/Círculo).
 
-6. **Sincronizar `tools/bancada.html` com o motor Java**. A bancada tem o
-   `StrategySelector`/`LatticeFinder`/`EdgeGluePairGenerator` etc. portados,
-   mas AINDA NÃO tem o `SheetPacker.pack()` atualizado com: validação final
-   em resolução plena real (a versão JS de `packSheet` é a versão ANTIGA,
-   sem o `SpatialIndex`/simplificação/correção do reaproveitamento de
-   sobra) — só o `estimate()` foi portado corretamente. Se for pra usar a
-   bancada pra testar de verdade (não só a prévia), precisa portar essas
-   correções também.
+6. ~~Sincronizar `tools/bancada.html` com o motor Java~~ **FEITO**:
+   `packSheet` agora tem `tileRegion`/`tryBestRotationInRegion` portados
+   (reaproveitamento de sobra escaneando a área útil inteira, igual ao
+   Java), e a trava de espelhamento (`mirrorAuthorized`) com botão real
+   de autorização na UI. Verificado via Node contra as 3 fixtures: números
+   batem exatos com o Java (bracket 648=646+2, trapézio 10 e 71=61+10,
+   15746A 106), zero colisões. Ainda sem `SpatialIndex` (usa varredura
+   linear) — no fixture do bracket isso levou ~37s em Node (mais lento que
+   o Java, que usa grade espacial); aceitável pro uso interativo atual mas
+   é o próximo alvo se performance virar problema real.
 
 7. **Decisão de arquitetura Java→JS pendente** desde o início da sessão
    anterior — pra integrar de verdade com o app Básico (JS puro,
