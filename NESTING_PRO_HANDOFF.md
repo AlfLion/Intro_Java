@@ -81,12 +81,15 @@ Em vez de um classificador que adivinha o tipo de peça, gera candidatos por
   (não rede) tentando encaixar uma peça pequena diferente nos espaços que
   a receita da peça grande deixou, gulosa mas com colisão real validada
   a cada aceite. Ver item 1 do "falta fazer" pra limitações conhecidas.
+- `HoleFiller.fillHoles()`: part-in-part de verdade — encaixa uma peça
+  pequena DENTRO do furo de cada instância aceita da peça grande (nunca
+  gasta área extra da chapa). Ver item 3 do "falta fazer".
 
 ### 4. Validação — tudo com geometria real, não só matemática
 - `DxfPipelineRegressionCheck`, `StrategySelectionDemo`, `SheetPackingDemo`,
-  `VoidFillingDemo`, `EncakitAnalysisDemo`: demos runnáveis contra fixtures
-  reais em `src/main/resources/fixtures/` (`15746A.DXF`, `TRAP.DXF`,
-  `BRACKET_COMPACTO.DXF`, `ENCAKIT.DXF`).
+  `VoidFillingDemo`, `EncakitAnalysisDemo`, `RingKitDemo`: demos runnáveis
+  contra fixtures reais em `src/main/resources/fixtures/` (`15746A.DXF`,
+  `TRAP.DXF`, `BRACKET_COMPACTO.DXF`, `ENCAKIT.DXF`, `2CIRC.DXF`).
 - Validações fortes conseguidas:
   - Trapézio: `cola-por-aresta` → 98,2% líquido (bate com a análise
     analítica: colar 2 trapézios pela perna forma paralelogramo ~100%
@@ -160,14 +163,32 @@ Em vez de um classificador que adivinha o tipo de peça, gera candidatos por
    nunca foi validado contra geometria real — só contra 9 casos sintéticos
    (Java) + os mesmos 9 replicados em JS, todos passando.
 
-3. ~~Peça com furo interno de verdade (part-in-part)~~ **Esclarecido, não
-   é bem o caso do ENCAKIT.DXF**: as duas peças do kit real (commitado
-   agora) têm furos, mas todos pequenos (parafuso) — a peça "média" não
-   fica DENTRO de um furo da peça "grande", fica no vão externo entre
-   cópias dela (mesmo padrão void-filling do item 1, não part-in-part de
-   verdade). Ainda nenhum exemplo real tem um furo grande o bastante pra
-   caber outra peça inteira dentro dele — se precisar testar isso
-   especificamente, ainda precisa de um exemplo novo.
+3. ~~Peça com furo interno de verdade (part-in-part)~~ **FEITO — exemplo
+   real recebido e resolvido com match exato**: o usuário mandou
+   `2CIRC.DXF` (fixture commitada) — anel grande (Ø100/Ø90) com anel
+   pequeno (Ø80/Ø70) cortado CONCENTRICAMENTE de dentro do furo do
+   grande, repetido numa rede hexagonal em 20 posições numa chapa
+   500×500mm. O app Básico hoje (calculadora de Kit) só chega a 12 kits
+   (colunas separadas, sem rede hexagonal nem furo aproveitado); o
+   usuário a mão chega a 20.
+
+   Isso é um mecanismo DIFERENTE do void-filling do item 1 (que preenche
+   sobra de chapa fora das peças) — aqui a peça pequena nunca gasta área
+   nenhuma da chapa, sai de graça de dentro do furo da peça grande. Nova
+   classe `packing/HoleFiller.fillHoles(...)`: transforma o furo da peça
+   primária pelo mesmo rigid-transform de cada instância aceita, tenta
+   centralizar a peça secundária no centroide do furo em várias rotações,
+   aceita a primeira que caiba inteira sem cruzar a borda (folga
+   aproximada encolhendo o furo em direção ao centroide — exata pra furos
+   circulares/convexos, o caso real testado).
+
+   **Resultado: o motor sozinho chega aos MESMOS 20/20 kits do usuário**,
+   sem nenhuma dica manual — `StrategySelector` já descobre a rede
+   hexagonal da peça grande sozinho (`orientacao-unica`, já que peça
+   redonda não depende de rotação), `HoleFiller` encaixa a peça pequena
+   em 20 de 20 furos disponíveis. Validado com `RingKitDemo`: 0 colisões
+   entre cópias da peça pequena, 0 fora de qualquer furo (checado
+   vértice-a-vértice, independente da própria lógica do `HoleFiller`).
 
 4. ~~Performance da validação final em resolução plena~~ **PARCIALMENTE
    FEITO**: `GeometryOps.convexHull()` (monotone chain de Andrew) +
@@ -233,6 +254,11 @@ Em vez de um classificador que adivinha o tipo de peça, gera candidatos por
   sem espelho.
 - `TRAP/TRAPENC` — trapézio isósceles simples, sem furo. Fixture comitada
   como `TRAP.DXF`.
+- `2CIRC` — kit de 2 anéis concêntricos (Ø100/Ø90 + Ø80/Ø70, o pequeno
+  cortado de dentro do furo do grande) em rede hexagonal, 20 posições
+  numa chapa 500×500mm. Exemplo real de part-in-part. **Fixture comitada**
+  como `2CIRC.DXF`. Motor bate os 20/20 kits do usuário sozinho — ver
+  `RingKitDemo`.
 
 Se quiser mais fixtures de regressão permanentes, o DXF original do
 OUTRAPRT está só no histórico de upload de sessões anteriores — peça pro
