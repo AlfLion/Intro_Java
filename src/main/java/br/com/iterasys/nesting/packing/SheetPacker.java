@@ -44,6 +44,18 @@ import java.util.List;
  * diferente porque a receita de encaixe nao e simetrica em relacao a troca
  * de eixos.
  *
+ * {@link #estimate} da uma previa numerica quase instantanea (area util /
+ * area-por-peca da melhor receita, sem desenhar posicao nenhuma) ANTES de
+ * rodar {@link #pack} de verdade - mesmo espirito do "calcularDicaLimpa" +
+ * "autorizarBuscaCompletaKit" do app Basico: mostra um numero rapido,
+ * so faz a busca cara se o usuario topar esperar. Deliberadamente NAO
+ * desenha geometria nenhuma no modo rapido: uma primeira tentativa que
+ * pulava so a validacao final (mas ainda desenhava posicoes com a busca
+ * simplificada) deu 500 colisoes reais em 544 pecas no fixture do bracket -
+ * a simplificacao usada na busca nao e confiavel o bastante pra pular a
+ * validacao final, entao o modo rapido evita o problema por completo nao
+ * desenhando nada, so estimando por area.
+ *
  * Ainda nao inclui: aproveitamento de vaos (peca pequena no espaco que
  * sobra dentro do encaixe, tipo ENCAKIT) - fica para as proximas etapas.
  */
@@ -94,6 +106,62 @@ public final class SheetPacker {
     private SheetPacker() {
     }
 
+    public static final class QuickEstimate {
+        public final String strategyName;
+        public final int estimatedCount;
+        public final double estimatedPct;
+
+        QuickEstimate(String strategyName, int estimatedCount, double estimatedPct) {
+            this.strategyName = strategyName;
+            this.estimatedCount = estimatedCount;
+            this.estimatedPct = estimatedPct;
+        }
+    }
+
+    /**
+     * Previa quase instantanea: SO conta (area util / area-por-peca da
+     * melhor receita), sem desenhar nenhuma posicao real - por isso nunca
+     * tem risco de "colisao no preview" (nao ha geometria posicionada pra
+     * colidir). Mesmo espirito do "calcularDicaLimpa" do app Basico: mostra
+     * um numero rapido pro usuario decidir se topa esperar o {@link #pack}
+     * de verdade (que desenha as posicoes e pode levar alguns segundos em
+     * pecas com muitos vertices).
+     *
+     * Primeira tentativa desta etapa foi um "packQuick" que pulava a
+     * validacao final em resolucao plena pra ganhar velocidade - e deu 500
+     * colisoes reais em 544 pecas no fixture do bracket. A simplificacao de
+     * geometria usada na busca nao e confiavel o bastante pra pular essa
+     * validacao. Esta versao evita o problema simplesmente NAO desenhando
+     * posicao nenhuma no modo rapido.
+     */
+    public static QuickEstimate estimate(Polygon fullOuter, List<Polygon> holes, double sheetW, double sheetH,
+                                          double marginMm, double gapMm) {
+        StrategySelector.Result sel = StrategySelector.select(fullOuter, gapMm);
+        NestingRecipe recipe = sel.bestNoMirror;
+        if (recipe == null) {
+            return new QuickEstimate("nenhuma", 0, 0);
+        }
+        double usableW = sheetW - 2 * marginMm;
+        double usableH = sheetH - 2 * marginMm;
+        if (usableW <= 0 || usableH <= 0) {
+            return new QuickEstimate(recipe.strategyName, 0, 0);
+        }
+        double areaLiquidaPeca = Math.abs(fullOuter.area());
+        for (Polygon h : holes) areaLiquidaPeca -= Math.abs(h.area());
+
+        double usableArea = usableW * usableH;
+        int count = (int) Math.floor(usableArea / recipe.areaPerPieceMm2Gross);
+        double pct = usableArea > 0 ? 100.0 * count * areaLiquidaPeca / usableArea : 0;
+        return new QuickEstimate(recipe.strategyName, count, pct);
+    }
+
+    /**
+     * Busca completa: melhor estrategia dentre os 3 mecanismos + reaproveitamento
+     * de sobra de borda, com as posicoes de verdade desenhadas e validadas em
+     * resolucao plena. Pode levar alguns segundos em pecas com muitos vertices
+     * - use {@link #estimate} pra mostrar um numero rapido antes e deixar o
+     * usuario decidir se topa esperar por este aqui.
+     */
     public static Result pack(Polygon fullOuter, List<Polygon> holes, double sheetW, double sheetH,
                                double marginMm, double gapMm) {
         StrategySelector.Result sel = StrategySelector.select(fullOuter, gapMm);
@@ -153,7 +221,9 @@ public final class SheetPacker {
         // Validacao final em RESOLUCAO PLENA - a busca acima usou a peca
         // simplificada como atalho; nunca confia nisso sozinho (mesma licao
         // do V49). Remove qualquer aceite que colida de verdade (nao deveria
-        // acontecer, mas descarta em vez de arriscar).
+        // acontecer, mas descarta em vez de arriscar). E o custo dominante em
+        // pecas com muitos vizinhos proximos - ver {@link #estimate} pra uma
+        // previa que nao paga esse custo (porque nao desenha posicao nenhuma).
         List<Placement> validated = validateFullResolution(fullOuter, centroid, accepted, pieceMaxDim);
         int reuseCount = validated.size() - Math.min(primaryCount, validated.size());
         return new Result(validated, recipe.strategyName, delta, sheetW * sheetH, areaLiquidaPeca,
@@ -188,6 +258,22 @@ public final class SheetPacker {
         }
         Result emPe = pack(fullOuter, holes, sheetH, sheetW, marginMm, gapMm);
         return emPe.placements.size() > deitada.placements.size() ? emPe : deitada;
+    }
+
+    /**
+     * Previa rapida das duas orientacoes, usando {@link #estimate} nas duas
+     * (sem desenhar posicao nenhuma) - pra decidir qual orientacao vale a
+     * pena mandar pra busca completa, sem pagar o custo dela duas vezes so
+     * pra escolher.
+     */
+    public static QuickEstimate estimateBestOrientation(Polygon fullOuter, List<Polygon> holes,
+                                                          double sheetW, double sheetH, double marginMm, double gapMm) {
+        QuickEstimate deitada = estimate(fullOuter, holes, sheetW, sheetH, marginMm, gapMm);
+        if (Math.abs(sheetW - sheetH) < 1e-9) {
+            return deitada;
+        }
+        QuickEstimate emPe = estimate(fullOuter, holes, sheetH, sheetW, marginMm, gapMm);
+        return emPe.estimatedCount > deitada.estimatedCount ? emPe : deitada;
     }
 
     /** [maxX, maxY] ocupados ate agora (ao menos o minimo util, se nada foi aceito). */

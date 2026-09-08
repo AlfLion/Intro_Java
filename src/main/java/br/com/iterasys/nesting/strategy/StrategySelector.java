@@ -50,6 +50,14 @@ public final class StrategySelector {
     private StrategySelector() {
     }
 
+    /**
+     * Roda os 3 mecanismos de encaixe (orientacao unica, interlock em torno
+     * do centroide, cola-por-aresta) e escolhe pelo mm^2/peca. Rapido o
+     * bastante pra rodar sempre (nao produz posicoes de peca, so a
+     * "receita" - ver {@code SheetPacker.estimate} pra uma previa numerica
+     * baseada nisso, e {@code SheetPacker.pack} pra desenhar as posicoes de
+     * verdade, essa sim cara o bastante pra pedir autorizacao antes).
+     */
     public static Result select(Polygon fullResolutionOuter, double gapMm) {
         Polygon simplified = GeometryOps.simplify(fullResolutionOuter, SIMPLIFY_EPSILON_MM);
         Point2D centroid = GeometryOps.centroid(simplified);
@@ -57,8 +65,7 @@ public final class StrategySelector {
         List<PairGenerator> generators = List.of(
                 new SingleOrientationGenerator(),
                 new CentroidPairGenerator(),
-                new EdgeGluePairGenerator(15.0)
-        );
+                new EdgeGluePairGenerator(15.0));
 
         List<NestingRecipe> all = new ArrayList<>();
         for (PairGenerator gen : generators) {
