@@ -74,6 +74,10 @@ Em vez de um classificador que adivinha o tipo de peça, gera candidatos por
   - `estimate()` / `estimateBestOrientation()`: prévia rápida por área,
     sem desenhar posição nenhuma — ~20× mais rápido, zero risco de
     colisão no preview (ver lição abaixo).
+- `VoidFiller.fillVoids()`: aproveitamento de vãos — varredura em grade
+  (não rede) tentando encaixar uma peça pequena diferente nos espaços que
+  a receita da peça grande deixou, gulosa mas com colisão real validada
+  a cada aceite. Ver item 1 do "falta fazer" pra limitações conhecidas.
 
 ### 4. Validação — tudo com geometria real, não só matemática
 - `DxfPipelineRegressionCheck`, `StrategySelectionDemo`, `SheetPackingDemo`:
@@ -117,12 +121,19 @@ Em vez de um classificador que adivinha o tipo de peça, gera candidatos por
 
 ## DETALHAMENTO DO QUE FALTA FAZER
 
-1. **Void-filling automático** (peça pequena no vão que a receita vencedora
-   deixa, tipo ENCAKIT). `NestedKitAuditor` já sabe LER esse padrão num
-   DXF pronto; falta o motor GERAR isso sozinho — detectar o vão que sobra
-   dentro/entre as peças já posicionadas e tentar encaixar peça menor do
-   kit ali, generalizando a lógica de "vãos" que o app Básico já tem para
-   retângulo/anel simples.
+1. ~~Void-filling automático~~ **FEITO** (mecanismo genérico, ainda sem
+   validação contra kit real): `packing/VoidFiller.fillVoids(...)` — varredura
+   em grade (não rede/lattice, porque o vão não tem forma regular) testando
+   algumas rotações fixas em cada ponto, aceita o primeiro encaixe sem
+   colisão real (contra as peças grandes E contra as pequenas já aceitas)
+   e segue pro próximo ponto. Guloso, não ótimo, mas correto — validado
+   com `VoidFillingDemo` (peça pequena sintética 6×6mm nos vãos do
+   BRACKET_COMPACTO.DXF: 840 encaixadas, 0 colisões, aproveitamento
+   64,5%→67,8%). **Limitação conhecida**: não aplica `gapMm` como folga
+   entre peça pequena e peça grande (só garante zero sobreposição real,
+   que é sempre seguro, mas pode encostar sem vão nenhum) — documentado
+   no Javadoc da classe. Falta: nenhum exemplo real de kit (ENCAKIT.DXF)
+   foi testado ainda — ver item 3 abaixo.
 
 2. ~~Regra de negócio do espelhamento — falta o fluxo, não a detecção~~
    **FEITO no motor e na bancada**: `StrategySelector.Result.chosen(mirrorAuthorized)`
