@@ -171,11 +171,24 @@ table.rank .mirror-tag{
           <div><label for="margin">Margem (mm)</label><input type="number" id="margin" value="3" min="0" step="0.5"></div>
           <div><label for="gap">Espaçamento (mm)</label><input type="number" id="gap" value="2" min="0" step="0.5"></div>
         </div>
-        <button class="primary" id="runBtn" disabled>Carregue uma peça primeiro</button>
+        <button class="primary" id="estimateBtn" disabled>Carregue uma peça primeiro</button>
+      </div>
+
+      <div class="panel" id="previewPanel" style="display:none;">
+        <h2>3. Prévia rápida</h2>
+        <div class="stats">
+          <div class="stat"><div class="num" id="previewCount">&mdash;</div><div class="lbl">peças (estimativa)</div></div>
+          <div class="stat"><div class="num" id="previewPct">&mdash;</div><div class="lbl">líquido (estimativa)</div></div>
+          <div class="stat"><div class="num" id="previewTime">&mdash;</div><div class="lbl">tempo</div></div>
+        </div>
+        <p class="note">Estimativa por área (receita: <span class="mono" id="previewStrategy">&mdash;</span>) — não desenha
+          posição nenhuma, então não tem risco de peça sobreposta, mas também não é o resultado final (costuma
+          superestimar um pouco por não contar o desperdício de borda).</p>
+        <button class="primary" id="runBtn">Buscar encaixe completo (pode levar alguns segundos)</button>
       </div>
 
       <div class="panel" id="resultPanel" style="display:none;">
-        <h2>3. Resultado</h2>
+        <h2>4. Resultado completo</h2>
         <div class="stats">
           <div class="stat good"><div class="num" id="statCount">&mdash;</div><div class="lbl">peças</div></div>
           <div class="stat"><div class="num" id="statPct">&mdash;</div><div class="lbl">líquido</div></div>
@@ -187,7 +200,7 @@ table.rank .mirror-tag{
     </div>
 
     <div class="viewport" id="viewport">
-      <div class="placeholder">Carregue um DXF ou um dos exemplos à esquerda, ajuste a chapa e clique em <b style="color:var(--text)">Empacotar</b>.</div>
+      <div class="placeholder">Carregue um DXF ou um dos exemplos à esquerda, ajuste a chapa e clique em <b style="color:var(--text)">Estimar</b>.</div>
       <div class="loading" id="loadingOverlay">calculando…</div>
     </div>
   </div>
@@ -648,6 +661,24 @@ function selectStrategy(fullOuter, gapMm) {
   return { all, bestOverall, bestNoMirror };
 }
 
+// Previa rapida no espirito do "calcularDicaLimpa" do app Basico: SO conta
+// (area util / area-por-peca da melhor receita), sem desenhar posicao
+// nenhuma - por isso nao tem risco de "colisao no preview". Mesma logica
+// do SheetPacker.estimate() do motor Java.
+function estimateNesting(fullOuter, holes, sheetW, sheetH, marginMm, gapMm) {
+  const sel = selectStrategy(fullOuter, gapMm);
+  const recipe = sel.bestNoMirror;
+  if (!recipe) return { strategyName: 'nenhuma', estimatedCount: 0, estimatedPct: 0 };
+  const usableW = sheetW - 2 * marginMm, usableH = sheetH - 2 * marginMm;
+  if (usableW <= 0 || usableH <= 0) return { strategyName: recipe.strategyName, estimatedCount: 0, estimatedPct: 0 };
+  let areaLiquidaPeca = Math.abs(polygonArea(fullOuter));
+  for (const h of holes) areaLiquidaPeca -= Math.abs(polygonArea(h));
+  const usableArea = usableW * usableH;
+  const count = Math.floor(usableArea / recipe.areaPerPieceMm2Gross);
+  const pct = usableArea > 0 ? 100 * count * areaLiquidaPeca / usableArea : 0;
+  return { strategyName: recipe.strategyName, estimatedCount: count, estimatedPct: pct };
+}
+
 function snapToAxisDelta(angDeg) {
   const mod90 = ((angDeg % 90) + 90) % 90;
   return mod90 > 45 ? 90 - mod90 : -mod90;
@@ -726,9 +757,11 @@ let currentName = '';
 const dropzone = document.getElementById('dropzone');
 const fileInput = document.getElementById('fileInput');
 const pieceReadout = document.getElementById('pieceReadout');
+const estimateBtn = document.getElementById('estimateBtn');
 const runBtn = document.getElementById('runBtn');
 const viewport = document.getElementById('viewport');
 const loadingOverlay = document.getElementById('loadingOverlay');
+const previewPanel = document.getElementById('previewPanel');
 const resultPanel = document.getElementById('resultPanel');
 
 function loadPieceText(text, name) {
@@ -747,8 +780,10 @@ function loadPieceText(text, name) {
       `<div class="row"><span>área líquida</span><b>${liquida.toFixed(1)} mm²</b></div>` +
       `<div class="row"><span>furos</span><b>${piece.holes.length}</b></div>`;
     pieceReadout.classList.add('show');
-    runBtn.disabled = false;
-    runBtn.textContent = 'Empacotar';
+    estimateBtn.disabled = false;
+    estimateBtn.textContent = 'Estimar';
+    previewPanel.style.display = 'none';
+    resultPanel.style.display = 'none';
     document.getElementById('engineStatus').textContent = 'peça carregada';
   } catch (err) {
     alert('Não consegui ler esse DXF: ' + err.message);
@@ -828,6 +863,44 @@ function renderRankTable(sel) {
   }
 }
 
+// Passo 1: previa rapida (sempre roda antes do empacotamento de verdade -
+// mesmo espirito do "calcularDicaLimpa" + "autorizarBuscaCompletaKit" do
+// app Basico: mostra um numero ja, so pede pra esperar o caro se o usuario
+// topar). Nao desenha posicao nenhuma, entao nao tem risco de colisao no
+// preview.
+estimateBtn.addEventListener('click', () => {
+  if (!currentPiece) return;
+  const sheetW = parseFloat(document.getElementById('sheetW').value);
+  const sheetH = parseFloat(document.getElementById('sheetH').value);
+  const margin = parseFloat(document.getElementById('margin').value);
+  const gap = parseFloat(document.getElementById('gap').value);
+
+  estimateBtn.disabled = true;
+  estimateBtn.textContent = 'Estimando…';
+  resultPanel.style.display = 'none';
+  document.getElementById('engineStatus').textContent = 'estimando';
+
+  setTimeout(() => {
+    const t0 = performance.now();
+    const est = estimateNesting(currentPiece.outer, currentPiece.holes, sheetW, sheetH, margin, gap);
+    const t1 = performance.now();
+
+    document.getElementById('previewCount').textContent = '~' + est.estimatedCount;
+    document.getElementById('previewPct').textContent = '~' + est.estimatedPct.toFixed(1) + '%';
+    document.getElementById('previewTime').textContent = ((t1 - t0) / 1000).toFixed(2) + 's';
+    document.getElementById('previewStrategy').textContent = est.strategyName;
+    previewPanel.style.display = 'block';
+
+    estimateBtn.disabled = false;
+    estimateBtn.textContent = 'Estimar de novo';
+    runBtn.disabled = false;
+    runBtn.textContent = 'Buscar encaixe completo (pode levar alguns segundos)';
+    document.getElementById('engineStatus').textContent = `prévia: ~${est.estimatedCount} peças`;
+  }, 20);
+});
+
+// Passo 2: busca completa de verdade (so roda quando o usuario clica aqui,
+// depois de ver a previa) - desenha as posicoes reais em SVG.
 runBtn.addEventListener('click', () => {
   if (!currentPiece) return;
   const sheetW = parseFloat(document.getElementById('sheetW').value);
@@ -837,7 +910,7 @@ runBtn.addEventListener('click', () => {
 
   runBtn.disabled = true;
   runBtn.textContent = 'Calculando…';
-  document.getElementById('engineStatus').textContent = 'processando';
+  document.getElementById('engineStatus').textContent = 'processando busca completa';
   let overlay = document.getElementById('loadingOverlay');
   if (overlay) overlay.classList.add('show');
 
@@ -857,7 +930,7 @@ runBtn.addEventListener('click', () => {
     resultPanel.style.display = 'block';
 
     runBtn.disabled = false;
-    runBtn.textContent = 'Empacotar de novo';
+    runBtn.textContent = 'Buscar de novo';
     document.getElementById('engineStatus').textContent = `${result.strategyName} · ${result.placements.length} peças`;
   }, 30);
 });
