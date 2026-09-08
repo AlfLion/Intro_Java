@@ -2,7 +2,7 @@
 
 Backup de continuidade. Tudo abaixo está commitado e pushado em
 `AlfLion/Intro_Java`, branch `claude/nesting-2d-irregular-engine-m2x79f`,
-até o commit `09cd927`.
+até o commit `82f0e42` (packBestSplit + bugfixes de limite de área útil).
 
 ## Método de trabalho (vale pra toda a frente Nesting PRO)
 
