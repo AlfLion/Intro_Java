@@ -105,8 +105,16 @@ public final class SheetPacker {
         double areaLiquidaPeca = Math.abs(fullOuter.area());
         for (Polygon h : holes) areaLiquidaPeca -= Math.abs(h.area());
 
+        // A discretizacao fina de arco do parser gera centenas de vertices por
+        // peca - caro demais pra testar colisao milhares de vezes durante a
+        // busca. Usa uma versao simplificada so pra essa fase (mesma tecnica
+        // do StrategySelector); valida em resolucao PLENA no final, antes de
+        // devolver o resultado.
+        Polygon searchOuter = GeometryOps.simplify(fullOuter, 0.4);
         Point2D centroid = GeometryOps.centroid(fullOuter);
         Point2D origin = new Point2D(0, 0);
+        double[] fullBB = fullOuter.boundingBox();
+        double pieceMaxDim = Math.max(fullBB[2] - fullBB[0], fullBB[3] - fullBB[1]);
 
         Point2D v1 = recipe.latticeV1;
         Point2D v2 = recipe.latticeV2;
@@ -126,7 +134,7 @@ public final class SheetPacker {
         List<Placement> accepted = new ArrayList<>();
         List<Polygon> acceptedPolys = new ArrayList<>();
 
-        tileRegion(fullOuter, centroid, alignedCell, av1, av2,
+        tileRegion(searchOuter, centroid, alignedCell, av1, av2,
                 usableMinX, usableMinY, usableMaxX, usableMaxY, accepted, acceptedPolys);
         int primaryCount = accepted.size();
 
@@ -135,16 +143,35 @@ public final class SheetPacker {
         // a borda util), depois na faixa que sobrou no topo (recalculada
         // depois da faixa direita, ja que ela pode ter avancado o uso em Y).
         double[] used = usedExtent(acceptedPolys, usableMinX, usableMinY);
-        tryBestRotationInRegion(fullOuter, centroid, alignedCell, av1, av2,
+        tryBestRotationInRegion(searchOuter, centroid, alignedCell, av1, av2,
                 used[0], usableMinY, usableMaxX, usableMaxY, accepted, acceptedPolys);
 
         used = usedExtent(acceptedPolys, usableMinX, usableMinY);
-        tryBestRotationInRegion(fullOuter, centroid, alignedCell, av1, av2,
+        tryBestRotationInRegion(searchOuter, centroid, alignedCell, av1, av2,
                 usableMinX, used[1], usableMaxX, usableMaxY, accepted, acceptedPolys);
 
-        int reuseCount = accepted.size() - primaryCount;
-        return new Result(accepted, recipe.strategyName, delta, sheetW * sheetH, areaLiquidaPeca,
-                primaryCount, reuseCount, sheetW, sheetH);
+        // Validacao final em RESOLUCAO PLENA - a busca acima usou a peca
+        // simplificada como atalho; nunca confia nisso sozinho (mesma licao
+        // do V49). Remove qualquer aceite que colida de verdade (nao deveria
+        // acontecer, mas descarta em vez de arriscar).
+        List<Placement> validated = validateFullResolution(fullOuter, centroid, accepted, pieceMaxDim);
+        int reuseCount = validated.size() - Math.min(primaryCount, validated.size());
+        return new Result(validated, recipe.strategyName, delta, sheetW * sheetH, areaLiquidaPeca,
+                Math.min(primaryCount, validated.size()), reuseCount, sheetW, sheetH);
+    }
+
+    /** Refaz a checagem de colisao com a geometria completa (nao a simplificada usada na busca). */
+    private static List<Placement> validateFullResolution(Polygon fullOuter, Point2D centroid,
+                                                            List<Placement> accepted, double pieceMaxDim) {
+        List<Placement> kept = new ArrayList<>(accepted.size());
+        SpatialIndex index = new SpatialIndex(Math.max(1.0, pieceMaxDim));
+        for (Placement p : accepted) {
+            Polygon poly = new PlacedPieceInstance(p.mirror, p.rotationDeg, p.position).materialize(fullOuter, centroid);
+            if (index.overlapsAny(poly)) continue;
+            kept.add(p);
+            index.insert(poly);
+        }
+        return kept;
     }
 
     /**
@@ -190,7 +217,7 @@ public final class SheetPacker {
      * cada tentativa parte do estado JA aceito (colide contra tudo que
      * existe), sem acumular entre si.
      */
-    private static void tryBestRotationInRegion(Polygon fullOuter, Point2D centroid,
+    private static void tryBestRotationInRegion(Polygon pieceOuter, Point2D centroid,
                                                  List<PlacedPieceInstance> baseCell, Point2D baseV1, Point2D baseV2,
                                                  double regionMinX, double regionMinY, double regionMaxX, double regionMaxY,
                                                  List<Placement> accepted, List<Polygon> acceptedPolys) {
@@ -206,7 +233,7 @@ public final class SheetPacker {
             List<Placement> trialAccepted = new ArrayList<>();
             List<Polygon> trialPolys = new ArrayList<>(acceptedPolys);
             int before = trialPolys.size();
-            tileRegion(fullOuter, centroid, rotCell, rv1, rv2,
+            tileRegion(pieceOuter, centroid, rotCell, rv1, rv2,
                     regionMinX, regionMinY, regionMaxX, regionMaxY, trialAccepted, trialPolys);
 
             if (bestNew == null || trialAccepted.size() > bestNew.size()) {
@@ -221,7 +248,7 @@ public final class SheetPacker {
     }
 
     /** Ladrilha uma celula (com os vetores de rede ja na orientacao desejada) dentro de um retangulo. */
-    private static void tileRegion(Polygon fullOuter, Point2D centroid,
+    private static void tileRegion(Polygon pieceOuter, Point2D centroid,
                                     List<PlacedPieceInstance> cellInstances, Point2D v1, Point2D v2,
                                     double regionMinX, double regionMinY, double regionMaxX, double regionMaxY,
                                     List<Placement> accepted, List<Polygon> acceptedPolys) {
@@ -230,11 +257,13 @@ public final class SheetPacker {
         if (regionW <= 0 || regionH <= 0) return;
 
         double minX = Double.MAX_VALUE, minY = Double.MAX_VALUE;
+        double pieceMaxDim = 0;
         for (PlacedPieceInstance inst : cellInstances) {
-            Polygon poly = inst.materialize(fullOuter, centroid);
+            Polygon poly = inst.materialize(pieceOuter, centroid);
             double[] bb = poly.boundingBox();
             minX = Math.min(minX, bb[0]);
             minY = Math.min(minY, bb[1]);
+            pieceMaxDim = Math.max(pieceMaxDim, Math.max(bb[2] - bb[0], bb[3] - bb[1]));
         }
 
         double shiftX = regionMinX - minX;
@@ -243,6 +272,9 @@ public final class SheetPacker {
         int rangeN = (int) Math.ceil(diag / Math.max(1.0, Math.hypot(v1.x, v1.y))) + 2;
         int rangeM = (int) Math.ceil(diag / Math.max(1.0, Math.hypot(v2.x, v2.y))) + 2;
 
+        SpatialIndex index = new SpatialIndex(Math.max(1.0, pieceMaxDim));
+        for (Polygon p : acceptedPolys) index.insert(p);
+
         for (int n = -rangeN; n <= rangeN; n++) {
             for (int m = -rangeM; m <= rangeM; m++) {
                 double ox = shiftX + n * v1.x + m * v2.x;
@@ -250,22 +282,16 @@ public final class SheetPacker {
                 for (PlacedPieceInstance inst : cellInstances) {
                     Point2D pos = new Point2D(inst.translation.x + ox, inst.translation.y + oy);
                     PlacedPieceInstance candidate = new PlacedPieceInstance(inst.mirror, inst.rotationDeg, pos);
-                    Polygon poly = candidate.materialize(fullOuter, centroid);
+                    Polygon poly = candidate.materialize(pieceOuter, centroid);
                     double[] bb = poly.boundingBox();
                     if (bb[0] < regionMinX - 1e-6 || bb[1] < regionMinY - 1e-6
                             || bb[2] > regionMaxX + 1e-6 || bb[3] > regionMaxY + 1e-6) {
                         continue;
                     }
-                    boolean collide = false;
-                    for (Polygon other : acceptedPolys) {
-                        if (GeometryOps.overlaps(poly, other)) {
-                            collide = true;
-                            break;
-                        }
-                    }
-                    if (collide) continue;
+                    if (index.overlapsAny(poly)) continue;
                     accepted.add(new Placement(candidate.mirror, candidate.rotationDeg, candidate.translation));
                     acceptedPolys.add(poly);
+                    index.insert(poly);
                 }
             }
         }
