@@ -45,6 +45,22 @@ public final class StrategySelector {
             return bestOverall != null && bestOverall.usesMirror
                     && (bestNoMirror == null || bestOverall.areaPerPieceMm2Gross < bestNoMirror.areaPerPieceMm2Gross - 1e-6);
         }
+
+        /** Quanto a receita espelhada ganha em peca/m2 sobre a melhor sem espelho, em %. 0 se nao ha ganho pendente. */
+        public double mirrorGainPct() {
+            if (!mirrorPending()) return 0;
+            return 100.0 * (bestNoMirror.areaPerPieceMm2Gross - bestOverall.areaPerPieceMm2Gross) / bestNoMirror.areaPerPieceMm2Gross;
+        }
+
+        /**
+         * Receita a usar dado se o espelhamento foi autorizado explicitamente.
+         * Sem autorizacao ({@code mirrorAuthorized=false}) SEMPRE devolve
+         * {@link #bestNoMirror} - a trava de espelhamento nunca aplica sozinha.
+         */
+        public NestingRecipe chosen(boolean mirrorAuthorized) {
+            if (mirrorAuthorized && bestOverall != null && bestOverall.usesMirror) return bestOverall;
+            return bestNoMirror;
+        }
     }
 
     private StrategySelector() {

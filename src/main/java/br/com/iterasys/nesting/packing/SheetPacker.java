@@ -53,6 +53,15 @@ import java.util.List;
  * validacao final, entao o modo rapido evita o problema por completo nao
  * desenhando nada, so estimando por area.
  *
+ * Trava de espelhamento (regra de negocio, nunca automatica): por padrao
+ * ({@code mirrorAuthorized=false}, inclusive nas sobrecargas sem esse
+ * parametro) so usa a receita SEM espelho, mesmo que uma espelhada renda
+ * mais peca/m2. {@code estimate}/{@code pack} sempre devolvem
+ * {@code mirrorPending}/{@code mirrorGainPct} no resultado - quem chama
+ * mostra isso ao usuario e, SO se ele autorizar explicitamente, chama de
+ * novo com {@code mirrorAuthorized=true} pra liberar a receita espelhada.
+ * O motor nunca decide isso sozinho.
+ *
  * Ainda nao inclui: aproveitamento de vaos (peca pequena no espaco que
  * sobra dentro do encaixe, tipo ENCAKIT) - fica para as proximas etapas.
  */
@@ -83,10 +92,13 @@ public final class SheetPacker {
         public final int reuseCount;
         public final double sheetWidthMm;
         public final double sheetHeightMm;
+        public final boolean mirrorUsed;
+        public final boolean mirrorPending;
+        public final double mirrorGainPct;
 
         Result(List<Placement> placements, String strategyName, double alignmentDeltaDeg,
                double sheetAreaMm2, double piecesNetAreaMm2, int primaryCount, int reuseCount,
-               double sheetWidthMm, double sheetHeightMm) {
+               double sheetWidthMm, double sheetHeightMm, boolean mirrorUsed, boolean mirrorPending, double mirrorGainPct) {
             this.placements = placements;
             this.strategyName = strategyName;
             this.alignmentDeltaDeg = alignmentDeltaDeg;
@@ -97,6 +109,9 @@ public final class SheetPacker {
             this.reuseCount = reuseCount;
             this.sheetWidthMm = sheetWidthMm;
             this.sheetHeightMm = sheetHeightMm;
+            this.mirrorUsed = mirrorUsed;
+            this.mirrorPending = mirrorPending;
+            this.mirrorGainPct = mirrorGainPct;
         }
     }
 
@@ -107,11 +122,16 @@ public final class SheetPacker {
         public final String strategyName;
         public final int estimatedCount;
         public final double estimatedPct;
+        public final boolean mirrorPending;
+        public final double mirrorGainPct;
 
-        QuickEstimate(String strategyName, int estimatedCount, double estimatedPct) {
+        QuickEstimate(String strategyName, int estimatedCount, double estimatedPct,
+                      boolean mirrorPending, double mirrorGainPct) {
             this.strategyName = strategyName;
             this.estimatedCount = estimatedCount;
             this.estimatedPct = estimatedPct;
+            this.mirrorPending = mirrorPending;
+            this.mirrorGainPct = mirrorGainPct;
         }
     }
 
@@ -133,15 +153,29 @@ public final class SheetPacker {
      */
     public static QuickEstimate estimate(Polygon fullOuter, List<Polygon> holes, double sheetW, double sheetH,
                                           double marginMm, double gapMm) {
+        return estimate(fullOuter, holes, sheetW, sheetH, marginMm, gapMm, false);
+    }
+
+    /**
+     * Mesma previa, mas {@code mirrorAuthorized} decide se a receita
+     * espelhada pode ser usada quando ela for a melhor global - a trava de
+     * espelhamento so libera quando quem chama passa {@code true}, o que so
+     * deve acontecer depois de o usuario autorizar explicitamente ao ver
+     * {@code mirrorPending}/{@code mirrorGainPct} no resultado sem espelho.
+     */
+    public static QuickEstimate estimate(Polygon fullOuter, List<Polygon> holes, double sheetW, double sheetH,
+                                          double marginMm, double gapMm, boolean mirrorAuthorized) {
         StrategySelector.Result sel = StrategySelector.select(fullOuter, gapMm);
-        NestingRecipe recipe = sel.bestNoMirror;
+        NestingRecipe recipe = sel.chosen(mirrorAuthorized);
+        boolean pending = sel.mirrorPending();
+        double gain = sel.mirrorGainPct();
         if (recipe == null) {
-            return new QuickEstimate("nenhuma", 0, 0);
+            return new QuickEstimate("nenhuma", 0, 0, pending, gain);
         }
         double usableW = sheetW - 2 * marginMm;
         double usableH = sheetH - 2 * marginMm;
         if (usableW <= 0 || usableH <= 0) {
-            return new QuickEstimate(recipe.strategyName, 0, 0);
+            return new QuickEstimate(recipe.strategyName, 0, 0, pending, gain);
         }
         double areaLiquidaPeca = Math.abs(fullOuter.area());
         for (Polygon h : holes) areaLiquidaPeca -= Math.abs(h.area());
@@ -149,7 +183,7 @@ public final class SheetPacker {
         double usableArea = usableW * usableH;
         int count = (int) Math.floor(usableArea / recipe.areaPerPieceMm2Gross);
         double pct = usableArea > 0 ? 100.0 * count * areaLiquidaPeca / usableArea : 0;
-        return new QuickEstimate(recipe.strategyName, count, pct);
+        return new QuickEstimate(recipe.strategyName, count, pct, pending, gain);
     }
 
     /**
@@ -161,10 +195,27 @@ public final class SheetPacker {
      */
     public static Result pack(Polygon fullOuter, List<Polygon> holes, double sheetW, double sheetH,
                                double marginMm, double gapMm) {
+        return pack(fullOuter, holes, sheetW, sheetH, marginMm, gapMm, false);
+    }
+
+    /**
+     * Mesma busca completa, mas {@code mirrorAuthorized} decide se a receita
+     * espelhada pode ser usada quando ela for a melhor global - mesma trava
+     * de espelhamento de {@link #estimate(Polygon, List, double, double, double, double, boolean)}.
+     * Rode {@link #pack(Polygon, List, double, double, double, double)} (sem
+     * espelho) primeiro; se o resultado vier com {@code mirrorPending=true} e
+     * o usuario autorizar explicitamente, so entao chame esta sobrecarga com
+     * {@code true}.
+     */
+    public static Result pack(Polygon fullOuter, List<Polygon> holes, double sheetW, double sheetH,
+                               double marginMm, double gapMm, boolean mirrorAuthorized) {
         StrategySelector.Result sel = StrategySelector.select(fullOuter, gapMm);
-        NestingRecipe recipe = sel.bestNoMirror;
+        NestingRecipe recipe = sel.chosen(mirrorAuthorized);
+        boolean pending = sel.mirrorPending();
+        double gain = sel.mirrorGainPct();
+        boolean mirrorUsed = recipe != null && recipe.usesMirror;
         if (recipe == null) {
-            return new Result(List.of(), "nenhuma", 0, sheetW * sheetH, 0, 0, 0, sheetW, sheetH);
+            return new Result(List.of(), "nenhuma", 0, sheetW * sheetH, 0, 0, 0, sheetW, sheetH, false, pending, gain);
         }
 
         double areaLiquidaPeca = Math.abs(fullOuter.area());
@@ -193,7 +244,7 @@ public final class SheetPacker {
         double usableMinX = marginMm, usableMinY = marginMm;
         double usableMaxX = sheetW - marginMm, usableMaxY = sheetH - marginMm;
         if (usableMaxX <= usableMinX || usableMaxY <= usableMinY) {
-            return new Result(List.of(), recipe.strategyName, delta, sheetW * sheetH, areaLiquidaPeca, 0, 0, sheetW, sheetH);
+            return new Result(List.of(), recipe.strategyName, delta, sheetW * sheetH, areaLiquidaPeca, 0, 0, sheetW, sheetH, mirrorUsed, pending, gain);
         }
 
         List<Placement> accepted = new ArrayList<>();
@@ -224,7 +275,7 @@ public final class SheetPacker {
         List<Placement> validated = validateFullResolution(fullOuter, centroid, accepted, pieceMaxDim);
         int reuseCount = validated.size() - Math.min(primaryCount, validated.size());
         return new Result(validated, recipe.strategyName, delta, sheetW * sheetH, areaLiquidaPeca,
-                Math.min(primaryCount, validated.size()), reuseCount, sheetW, sheetH);
+                Math.min(primaryCount, validated.size()), reuseCount, sheetW, sheetH, mirrorUsed, pending, gain);
     }
 
     /** Refaz a checagem de colisao com a geometria completa (nao a simplificada usada na busca). */
@@ -249,11 +300,18 @@ public final class SheetPacker {
      */
     public static Result packBestOrientation(Polygon fullOuter, List<Polygon> holes,
                                               double sheetW, double sheetH, double marginMm, double gapMm) {
-        Result deitada = pack(fullOuter, holes, sheetW, sheetH, marginMm, gapMm);
+        return packBestOrientation(fullOuter, holes, sheetW, sheetH, marginMm, gapMm, false);
+    }
+
+    /** Mesma escolha de orientacao, repassando a autorizacao de espelho pras duas tentativas. */
+    public static Result packBestOrientation(Polygon fullOuter, List<Polygon> holes,
+                                              double sheetW, double sheetH, double marginMm, double gapMm,
+                                              boolean mirrorAuthorized) {
+        Result deitada = pack(fullOuter, holes, sheetW, sheetH, marginMm, gapMm, mirrorAuthorized);
         if (Math.abs(sheetW - sheetH) < 1e-9) {
             return deitada;
         }
-        Result emPe = pack(fullOuter, holes, sheetH, sheetW, marginMm, gapMm);
+        Result emPe = pack(fullOuter, holes, sheetH, sheetW, marginMm, gapMm, mirrorAuthorized);
         return emPe.placements.size() > deitada.placements.size() ? emPe : deitada;
     }
 
@@ -265,11 +323,18 @@ public final class SheetPacker {
      */
     public static QuickEstimate estimateBestOrientation(Polygon fullOuter, List<Polygon> holes,
                                                           double sheetW, double sheetH, double marginMm, double gapMm) {
-        QuickEstimate deitada = estimate(fullOuter, holes, sheetW, sheetH, marginMm, gapMm);
+        return estimateBestOrientation(fullOuter, holes, sheetW, sheetH, marginMm, gapMm, false);
+    }
+
+    /** Mesma escolha de orientacao, repassando a autorizacao de espelho pras duas tentativas. */
+    public static QuickEstimate estimateBestOrientation(Polygon fullOuter, List<Polygon> holes,
+                                                          double sheetW, double sheetH, double marginMm, double gapMm,
+                                                          boolean mirrorAuthorized) {
+        QuickEstimate deitada = estimate(fullOuter, holes, sheetW, sheetH, marginMm, gapMm, mirrorAuthorized);
         if (Math.abs(sheetW - sheetH) < 1e-9) {
             return deitada;
         }
-        QuickEstimate emPe = estimate(fullOuter, holes, sheetH, sheetW, marginMm, gapMm);
+        QuickEstimate emPe = estimate(fullOuter, holes, sheetH, sheetW, marginMm, gapMm, mirrorAuthorized);
         return emPe.estimatedCount > deitada.estimatedCount ? emPe : deitada;
     }
 

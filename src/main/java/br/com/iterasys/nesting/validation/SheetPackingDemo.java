@@ -57,6 +57,10 @@ public final class SheetPackingDemo {
                 t1 - t0, r.strategyName, r.alignmentDeltaDeg);
         System.out.printf("Pecas encaixadas: %d (primaria=%d + reaproveitada=%d) | aproveitamento liquido: %.1f%%%n",
                 r.placements.size(), r.primaryCount, r.reuseCount, 100.0 * r.usedAreaMm2 / usableArea);
+        if (r.mirrorPending) {
+            System.out.printf("Espelho pendente de autorizacao: receita espelhada renderia +%.1f%% peca/m2 (nao aplicado sem autorizacao explicita)%n",
+                    r.mirrorGainPct);
+        }
 
         Point2D centroid = GeometryOps.centroid(g.getOuter());
         List<Polygon> polys = new ArrayList<>();
