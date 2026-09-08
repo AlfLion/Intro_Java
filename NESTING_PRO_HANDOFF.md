@@ -1,8 +1,33 @@
 # Nesting PRO — Handoff de continuidade (sessão 2026-09-07)
 
-Fim da janela de 5h desta conta. Trabalho continua na outra conta Pro.
 Tudo abaixo está commitado e pushado em `AlfLion/Intro_Java`, branch
 `claude/nesting-2d-irregular-engine-m2x79f`.
+
+## Atualização (mesma sessão, depois do primeiro handoff)
+
+Sessão continuou (mesma conta) depois do primeiro handoff abaixo. Adicionado
+desde então, tudo commitado:
+- `SheetPacker.packBestOrientation`: testa a chapa deitada e em pé, fica
+  com a melhor. Validado contra o fixture 15746A.DXF na chapa real
+  1095×914mm: deitada deu **106 peças, número EXATO** do Layout A manual
+  do usuário; em pé deu 92 (vs 98 manual — mesma limitação de "sobra como
+  retângulo" abaixo). Escolheu a deitada corretamente.
+- `SpatialIndex` (grade uniforme) + busca em geometria simplificada no
+  `SheetPacker`: reduz o custo da busca, mas a validação final em
+  resolução plena continua sendo o custo dominante pra peças com muitos
+  vizinhos genuinamente próximos (~10-11s pros 646 do bracket) — registrado
+  como limitação conhecida, não resolvido de verdade ainda.
+- Limitação nova encontrada e documentada: o reaproveitamento de sobra
+  (`SheetPacker`, item já existente) trata a sobra como retângulo; só
+  funciona quando os 2 vetores de rede da receita ficam quase
+  perpendiculares. Bracket com "cola-por-aresta" tem 2º vetor diagonal →
+  reaproveitamento fica em 0 (conservador, não erra, só não aproveita).
+
+Próximo passo natural: tratar a sobra como polígono (resolveria o caso
+acima) OU void-filling automático (peça pequena no vão, tipo ENCAKIT) OU
+resolver o custo da validação final em resolução plena de vez (reduzir
+discretização de arco, ou trocar por teste de colisão mais esperto que
+segmento-a-segmento bruto). Nenhum desses começado ainda.
 
 ## Método de trabalho (vale pra toda a frente Nesting PRO)
 
