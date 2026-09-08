@@ -16,26 +16,23 @@ import java.util.List;
  * (celula + 2 vetores de rede), aplica o {@link OrientationAligner} pra alinhar
  * o maior vetor de rede a um eixo da chapa, ladrilha de verdade dentro de uma
  * chapa WxH com margem, e ENTAO reaproveita a mesma receita girada em
- * 90/180/270 graus nas faixas de sobra que sobraram (direita e topo) -
- * exatamente a tecnica manual do "Layout C" da peca 15746A (86 pecas
- * principais + 12 extras giradas 90 graus na sobra do topo). Cada peca so e
- * aceita depois de validar geometria real (nunca confia so na matematica da
- * rede; mesma licao que o V49 ja registrava em comentario: amostragem/
- * aproximacao pode dar falso positivo de "cabe").
+ * 90/180/270 graus na sobra - exatamente a tecnica manual do "Layout C" da
+ * peca 15746A (86 pecas principais + 12 extras giradas 90 graus na sobra do
+ * topo). Cada peca so e aceita depois de validar geometria real (nunca
+ * confia so na matematica da rede; mesma licao que o V49 ja registrava em
+ * comentario: amostragem/aproximacao pode dar falso positivo de "cabe").
  *
- * Limitacao conhecida do reaproveitamento de sobra: a faixa "que sobrou" e
- * tratada como um RETANGULO (do fim do uso primario ate a borda util) - funciona
- * bem quando os 2 vetores de rede da receita ficam quase perpendiculares
- * (ex.: TRAP.DXF, onde um vetor fica exatamente no eixo apos o alinhamento:
- * validado ganhando peca extra numa chapa deliberadamente alta). Quando o
- * SEGUNDO vetor fica diagonal em vez de perpendicular ao primeiro (ex.: a
- * receita "cola-por-aresta" do BRACKET_COMPACTO.DXF, onde v1=(-26,10) nao e
- * nem perto de um eixo), a sobra real e um paralelogramo torto, nao um
- * retangulo - o reaproveitamento nao encontra nada nesse caso (testado:
- * 0 pecas extras, mas tambem 0 falso positivo, so fica conservador demais).
- * Resolver isso de verdade exigiria tratar a sobra como poligono, nao
- * retangulo - fica pra uma proxima iteracao se a diferenca de aproveitamento
- * justificar o esforco.
+ * O reaproveitamento de sobra NAO precisa saber o FORMATO da sobra
+ * (retangulo, faixa, paralelogramo torto de um vetor de rede diagonal) -
+ * ele escaneia a area util inteira de novo com a receita girada, e a
+ * checagem de colisao real (indice espacial) sozinha rejeita qualquer
+ * posicao ja ocupada. Uma versao anterior restringia a busca a uma faixa
+ * retangular calculada a partir do uso primario, o que so funcionava
+ * quando os 2 vetores de rede ficavam quase perpendiculares (ex.:
+ * TRAP.DXF) - falhava (reaproveitamento sempre 0) quando o 2o vetor era
+ * diagonal (ex.: a receita "cola-por-aresta" do BRACKET_COMPACTO.DXF,
+ * v1=(-26,10)). Escanear a area inteira em vez de uma faixa resolve isso
+ * sem precisar calcular a forma real da sobra.
  *
  * {@link #packBestOrientation} testa a chapa deitada E em pe (WxH e HxW) e
  * fica com a que render mais pecas - a mesma decisao que o usuario tomou
@@ -206,17 +203,17 @@ public final class SheetPacker {
                 usableMinX, usableMinY, usableMaxX, usableMaxY, accepted, acceptedPolys);
         int primaryCount = accepted.size();
 
-        // Reaproveitamento de sobra: mesma receita girada 90/180/270 na faixa
-        // que sobrou a direita (do fim do que a receita principal ocupou ate
-        // a borda util), depois na faixa que sobrou no topo (recalculada
-        // depois da faixa direita, ja que ela pode ter avancado o uso em Y).
-        double[] used = usedExtent(acceptedPolys, usableMinX, usableMinY);
+        // Reaproveitamento de sobra: mesma receita girada 90/180/270,
+        // escaneando a area util INTEIRA de novo (nao so uma faixa
+        // retangular calculada a partir do uso primario). A checagem de
+        // colisao contra o que ja foi aceito (indice espacial) ja rejeita
+        // sozinha qualquer posicao ocupada - por isso nao precisa mais
+        // adivinhar o FORMATO da sobra (retangulo, faixa, paralelogramo
+        // torto do vetor diagonal): ela emerge naturalmente de onde a
+        // colisao real deixa espaco. Resolve a limitacao anterior (sobra
+        // como retangulo so funcionava com vetores quase perpendiculares).
         tryBestRotationInRegion(searchOuter, centroid, alignedCell, av1, av2,
-                used[0], usableMinY, usableMaxX, usableMaxY, accepted, acceptedPolys);
-
-        used = usedExtent(acceptedPolys, usableMinX, usableMinY);
-        tryBestRotationInRegion(searchOuter, centroid, alignedCell, av1, av2,
-                usableMinX, used[1], usableMaxX, usableMaxY, accepted, acceptedPolys);
+                usableMinX, usableMinY, usableMaxX, usableMaxY, accepted, acceptedPolys);
 
         // Validacao final em RESOLUCAO PLENA - a busca acima usou a peca
         // simplificada como atalho; nunca confia nisso sozinho (mesma licao
@@ -274,17 +271,6 @@ public final class SheetPacker {
         }
         QuickEstimate emPe = estimate(fullOuter, holes, sheetH, sheetW, marginMm, gapMm);
         return emPe.estimatedCount > deitada.estimatedCount ? emPe : deitada;
-    }
-
-    /** [maxX, maxY] ocupados ate agora (ao menos o minimo util, se nada foi aceito). */
-    private static double[] usedExtent(List<Polygon> acceptedPolys, double minX, double minY) {
-        double maxX = minX, maxY = minY;
-        for (Polygon p : acceptedPolys) {
-            double[] bb = p.boundingBox();
-            maxX = Math.max(maxX, bb[2]);
-            maxY = Math.max(maxY, bb[3]);
-        }
-        return new double[]{maxX, maxY};
     }
 
     private static List<PlacedPieceInstance> rotateCell(List<PlacedPieceInstance> cell, double deltaDeg) {
