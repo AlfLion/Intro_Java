@@ -67,6 +67,9 @@ Em vez de um classificador que adivinha o tipo de peça, gera candidatos por
   −3,348°, usuário girou manualmente +3,3°.
 - `SpatialIndex`: grade uniforme pra acelerar colisão (evita testar contra
   TODOS os já aceitos).
+- `HullIndex`: como o `SpatialIndex`, mas testa o fecho convexo primeiro
+  (barato, sem risco de falso negativo) antes do teste exato — usado só
+  na validação final (ver item 4 do "falta fazer").
 - `SheetPacker`:
   - `pack()` / `packBestOrientation()`: busca completa — melhor receita +
     alinhamento + reaproveitamento de sobra girada 90/180/270° + validação
@@ -152,12 +155,29 @@ Em vez de um classificador que adivinha o tipo de peça, gera candidatos por
    dentro — só furos de parafuso pequenos. Precisa de um exemplo novo pra
    testar isso de verdade.
 
-4. **Performance da validação final em resolução plena**. Ainda é o custo
-   dominante em peças com muitos vizinhos próximos (~13-14s pros 648 do
-   bracket, ~5s por orientação da 15746A). Caminhos possíveis: reduzir a
-   discretização de arco do parser (perde precisão), ou trocar o teste de
-   colisão segmento-a-segmento bruto por algo mais esperto (ex.: SAT com
-   decomposição convexa). Não resolvido ainda.
+4. ~~Performance da validação final em resolução plena~~ **PARCIALMENTE
+   FEITO**: `GeometryOps.convexHull()` (monotone chain de Andrew) +
+   `packing/HullIndex` — testa o fecho convexo (poucos vértices, barato)
+   antes do teste aresta-a-aresta exato; fecho é sempre superconjunto do
+   polígono real, então "fechos não se sobrepõem" prova com certeza que
+   os polígonos reais também não, sem risco nenhum de falso negativo (só
+   confirma com o teste caro quando os fechos SE sobrepõem). Fecho da peça
+   calculado UMA VEZ; só os poucos vértices do fecho são transformados a
+   cada posicionamento (comuta com a transformação afim). Aplicado em
+   `SheetPacker#validateFullResolution`: ~9,8s→~7,3-7,6s no bracket
+   (648 peças, ~20-25% mais rápido), mesmos números, zero colisões.
+   **Testado e descartado** em `VoidFiller` — a peça pequena ali costuma
+   ser tão simples/convexa que calcular e testar o fecho é puro overhead
+   sem ganho (medido: deixou MAIS LENTO, 8,5s→11s), então `VoidFiller`
+   continua com `SpatialIndex` simples. Ainda não é uma solução completa
+   (bracket ainda leva ~7,3s, não é instantâneo) — decidido não arriscar
+   reduzir a discretização de arco do parser (mudaria a geometria usada em
+   TODOS os cálculos, inclusive os já validados contra números exatos do
+   usuário) nem uma decomposição convexa completa (escopo maior, mais
+   risco). Se precisar de mais velocidade, o próximo passo é paralelizar
+   a validação (candidatos são independentes até o momento do aceite) ou
+   revisitar a densidade de arco especificamente para o teste de colisão
+   (não para área/parsing).
 
 5. **Múltiplas configurações de chapa além de deitada/em pé**. Hoje
    `packBestOrientation` só testa as 2 orientações da MESMA chapa. Não

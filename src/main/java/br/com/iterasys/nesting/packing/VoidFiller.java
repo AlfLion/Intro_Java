@@ -87,6 +87,13 @@ public final class VoidFiller {
         double[] bb0 = secondaryOuter.boundingBox();
         double pieceMaxDim = Math.max(bb0[2] - bb0[0], bb0[3] - bb0[1]);
 
+        // Nao usa HullIndex aqui (ao contrario de SheetPacker#validateFullResolution):
+        // a peca "pequena" que preenche vaos costuma ser tao simples (poucos
+        // vertices, muitas vezes ja convexa) que calcular/testar o fecho dela
+        // e puro overhead sem ganho - medido: deixou este metodo MAIS LENTO
+        // (8.5s -> 11s no fixture do bracket). O SpatialIndex simples ja
+        // filtra pela distancia (bounding box + grade); o teste exato restante
+        // e barato porque o lado pequeno da comparacao tem poucos vertices.
         SpatialIndex index = new SpatialIndex(Math.max(1.0, pieceMaxDim));
         for (Polygon p : occupiedPolys) index.insert(p);
 

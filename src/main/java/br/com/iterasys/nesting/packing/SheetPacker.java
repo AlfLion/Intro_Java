@@ -278,16 +278,31 @@ public final class SheetPacker {
                 Math.min(primaryCount, validated.size()), reuseCount, sheetW, sheetH, mirrorUsed, pending, gain);
     }
 
-    /** Refaz a checagem de colisao com a geometria completa (nao a simplificada usada na busca). */
+    /**
+     * Refaz a checagem de colisao com a geometria completa (nao a
+     * simplificada usada na busca). Usa {@link HullIndex}: fecho convexo
+     * da peca calculado UMA VEZ, so os poucos vertices do fecho sao
+     * transformados a cada posicionamento (o fecho comuta com a
+     * transformacao afim de {@code materialize}) - fechos que nao se
+     * sobrepoem provam que os poligonos reais tambem nao se sobrepoem
+     * (fecho e sempre superconjunto), entao a maioria dos pares distantes
+     * e rejeitada sem pagar o teste aresta-a-aresta caro na geometria
+     * completa. So confirma com o teste exato quando os fechos SE
+     * sobrepoem. Isso era o custo dominante do pipeline antes desta
+     * otimizacao (~10-14s pra ~650 pecas do bracket).
+     */
     private static List<Placement> validateFullResolution(Polygon fullOuter, Point2D centroid,
                                                             List<Placement> accepted, double pieceMaxDim) {
+        Polygon hullBase = GeometryOps.convexHull(fullOuter);
         List<Placement> kept = new ArrayList<>(accepted.size());
-        SpatialIndex index = new SpatialIndex(Math.max(1.0, pieceMaxDim));
+        HullIndex index = new HullIndex(Math.max(1.0, pieceMaxDim));
         for (Placement p : accepted) {
-            Polygon poly = new PlacedPieceInstance(p.mirror, p.rotationDeg, p.position).materialize(fullOuter, centroid);
-            if (index.overlapsAny(poly)) continue;
+            PlacedPieceInstance inst = new PlacedPieceInstance(p.mirror, p.rotationDeg, p.position);
+            Polygon poly = inst.materialize(fullOuter, centroid);
+            Polygon hull = inst.materialize(hullBase, centroid);
+            if (index.overlapsAny(hull, poly)) continue;
             kept.add(p);
-            index.insert(poly);
+            index.insert(hull, poly);
         }
         return kept;
     }

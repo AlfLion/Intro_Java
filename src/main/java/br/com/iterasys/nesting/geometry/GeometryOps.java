@@ -156,6 +156,48 @@ public final class GeometryOps {
         return new Point2D(cx / (6 * a), cy / (6 * a));
     }
 
+    /**
+     * Fecho convexo (monotone chain de Andrew). Usado como filtro rapido e
+     * EXATO de colisao: o fecho e sempre um superconjunto do poligono
+     * original, entao "fechos nao se sobrepoem" implica com certeza
+     * "poligonos nao se sobrepoem" (zero risco de falso negativo) - so
+     * quando os fechos SE sobrepoem e preciso o teste caro aresta-a-aresta
+     * de verdade (fecho sobrepor nao implica poligono concavo sobrepor).
+     * Como fecho convexo comuta com transformacao afim (espelho+rotacao+
+     * translacao), dá pra calcular o fecho da peca UMA VEZ e so transformar
+     * os poucos vertices do fecho a cada posicionamento, em vez de
+     * recalcular pra cada instancia - ver {@code packing.HullIndex}.
+     */
+    public static Polygon convexHull(Polygon p) {
+        List<Point2D> pts = new java.util.ArrayList<>(p.getVertices());
+        pts.sort((a, b) -> a.x != b.x ? Double.compare(a.x, b.x) : Double.compare(a.y, b.y));
+        // remove duplicatas consecutivas apos ordenar, pra nao confundir o cross-product
+        List<Point2D> uniq = new java.util.ArrayList<>();
+        for (Point2D pt : pts) {
+            if (uniq.isEmpty() || pt.distanceTo(uniq.get(uniq.size() - 1)) > 1e-9) uniq.add(pt);
+        }
+        int n = uniq.size();
+        if (n < 3) return new Polygon(uniq);
+
+        Point2D[] lower = new Point2D[n];
+        int lowerSize = 0;
+        for (Point2D pt : uniq) {
+            while (lowerSize >= 2 && cross(lower[lowerSize - 2], lower[lowerSize - 1], pt) <= 0) lowerSize--;
+            lower[lowerSize++] = pt;
+        }
+        Point2D[] upper = new Point2D[n];
+        int upperSize = 0;
+        for (int i = n - 1; i >= 0; i--) {
+            Point2D pt = uniq.get(i);
+            while (upperSize >= 2 && cross(upper[upperSize - 2], upper[upperSize - 1], pt) <= 0) upperSize--;
+            upper[upperSize++] = pt;
+        }
+        List<Point2D> hull = new java.util.ArrayList<>(lowerSize + upperSize - 2);
+        for (int i = 0; i < lowerSize - 1; i++) hull.add(lower[i]);
+        for (int i = 0; i < upperSize - 1; i++) hull.add(upper[i]);
+        return new Polygon(hull);
+    }
+
     public static boolean overlapsAny(List<Polygon> a, List<Polygon> b) {
         for (Polygon pa : a) {
             for (Polygon pb : b) {
