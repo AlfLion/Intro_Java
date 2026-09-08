@@ -353,6 +353,117 @@ public final class SheetPacker {
         return emPe.estimatedCount > deitada.estimatedCount ? emPe : deitada;
     }
 
+    private static final double[] SPLIT_FRACTIONS = {0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7};
+
+    public static final class SplitResult {
+        public final Result result;
+        public final String splitDescription;
+
+        SplitResult(Result result, String splitDescription) {
+            this.result = result;
+            this.splitDescription = splitDescription;
+        }
+    }
+
+    /**
+     * Considera, alem de {@link #packBestOrientation} (chapa inteira, deitada
+     * ou em pe), cortar a chapa em 2 TIRAS de tamanhos diferentes (uma
+     * divisao vertical ou horizontal num ponto qualquer) e empacotar cada
+     * tira de forma independente com sua propria melhor orientacao. Vale a
+     * pena quando a receita vencedora nao ladrilha um retangulo perfeito
+     * (sobra de borda) e uma tira com outra proporcao aproveita melhor esse
+     * resto - a mesma logica por tras do "modo conjugado" do app Basico
+     * (combinar formatos de chapa diferentes), aqui aplicada dentro de UMA
+     * chapa fisica so.
+     *
+     * Faz a varredura de candidatos com {@link #estimateBestOrientation}
+     * (barato, nao desenha posicao nenhuma) pra cada fracao de corte
+     * candidata - so roda o {@link #pack} de verdade (caro, valida em
+     * resolucao plena) UMA VEZ, na configuracao vencedora. Reserva
+     * {@code gapMm} entre as 2 tiras como se fosse o corte fisico entre
+     * elas. Combina os resultados das 2 tiras deslocando a translacao de
+     * cada peca da tira B pelo deslocamento da tira - e ainda assim
+     * confere colisao real entre as 2 tiras combinadas antes de devolver
+     * (nunca confia so na separacao geometrica das regioes).
+     */
+    public static SplitResult packBestSplit(Polygon fullOuter, List<Polygon> holes,
+                                             double sheetW, double sheetH, double marginMm, double gapMm) {
+        QuickEstimate baseline = estimateBestOrientation(fullOuter, holes, sheetW, sheetH, marginMm, gapMm);
+        double bestEstCount = baseline.estimatedCount;
+        boolean bestVertical = false;
+        double bestSplitAt = -1;
+
+        for (double f : SPLIT_FRACTIONS) {
+            double wA = sheetW * f;
+            double wB = sheetW - wA - gapMm;
+            if (wA > 2 * marginMm && wB > 2 * marginMm) {
+                double total = estimateBestOrientation(fullOuter, holes, wA, sheetH, marginMm, gapMm).estimatedCount
+                        + estimateBestOrientation(fullOuter, holes, wB, sheetH, marginMm, gapMm).estimatedCount;
+                if (total > bestEstCount) {
+                    bestEstCount = total;
+                    bestVertical = true;
+                    bestSplitAt = wA;
+                }
+            }
+            double hA = sheetH * f;
+            double hB = sheetH - hA - gapMm;
+            if (hA > 2 * marginMm && hB > 2 * marginMm) {
+                double total = estimateBestOrientation(fullOuter, holes, sheetW, hA, marginMm, gapMm).estimatedCount
+                        + estimateBestOrientation(fullOuter, holes, sheetW, hB, marginMm, gapMm).estimatedCount;
+                if (total > bestEstCount) {
+                    bestEstCount = total;
+                    bestVertical = false;
+                    bestSplitAt = hA;
+                }
+            }
+        }
+
+        if (bestSplitAt < 0) {
+            return new SplitResult(packBestOrientation(fullOuter, holes, sheetW, sheetH, marginMm, gapMm), "sem divisao");
+        }
+
+        Result rA, rB;
+        double offsetX = 0, offsetY = 0;
+        String desc;
+        if (bestVertical) {
+            double wA = bestSplitAt, wB = sheetW - wA - gapMm;
+            rA = packBestOrientation(fullOuter, holes, wA, sheetH, marginMm, gapMm);
+            rB = packBestOrientation(fullOuter, holes, wB, sheetH, marginMm, gapMm);
+            offsetX = wA + gapMm;
+            desc = String.format("vertical em x=%.1fmm (tiras %.1f + %.1fmm)", wA, wA, wB);
+        } else {
+            double hA = bestSplitAt, hB = sheetH - hA - gapMm;
+            rA = packBestOrientation(fullOuter, holes, sheetW, hA, marginMm, gapMm);
+            rB = packBestOrientation(fullOuter, holes, sheetW, hB, marginMm, gapMm);
+            offsetY = hA + gapMm;
+            desc = String.format("horizontal em y=%.1fmm (tiras %.1f + %.1fmm)", hA, hA, hB);
+        }
+
+        List<Placement> combined = new ArrayList<>(rA.placements.size() + rB.placements.size());
+        combined.addAll(rA.placements);
+        for (Placement p : rB.placements) {
+            combined.add(new Placement(p.mirror, p.rotationDeg, new Point2D(p.position.x + offsetX, p.position.y + offsetY)));
+        }
+
+        // Confere colisao real entre as 2 tiras combinadas - nunca confia so
+        // na separacao geometrica das regioes (mesma disciplina do resto do
+        // motor). Reusa validateFullResolution: como as tiras ja foram
+        // validadas individualmente, so a fronteira entre elas pode, em
+        // teoria, ter algo errado.
+        double pieceMaxDim = Math.max(fullOuter.boundingBox()[2] - fullOuter.boundingBox()[0],
+                fullOuter.boundingBox()[3] - fullOuter.boundingBox()[1]);
+        Point2D centroid = GeometryOps.centroid(fullOuter);
+        List<Placement> validated = validateFullResolution(fullOuter, centroid, combined, pieceMaxDim);
+
+        double areaLiquidaPeca = rA.piecesNetAreaMm2 > 0 ? rA.piecesNetAreaMm2 : rB.piecesNetAreaMm2;
+        int primaryCount = rA.primaryCount + rB.primaryCount;
+        int reuseCount = validated.size() - Math.min(primaryCount, validated.size());
+        Result combinedResult = new Result(validated, rA.strategyName + " + " + rB.strategyName, Double.NaN,
+                sheetW * sheetH, areaLiquidaPeca, Math.min(primaryCount, validated.size()), reuseCount,
+                sheetW, sheetH, rA.mirrorUsed || rB.mirrorUsed, false, 0);
+        return new SplitResult(combinedResult, desc);
+    }
+
     private static List<PlacedPieceInstance> rotateCell(List<PlacedPieceInstance> cell, double deltaDeg) {
         Point2D origin = new Point2D(0, 0);
         List<PlacedPieceInstance> out = new ArrayList<>();
