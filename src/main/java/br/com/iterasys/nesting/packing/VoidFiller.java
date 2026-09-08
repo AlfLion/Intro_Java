@@ -91,28 +91,44 @@ public final class VoidFiller {
             return new Result(List.of(), areaLiquida);
         }
 
-        Polygon searchSecondary = GeometryOps.simplify(secondaryOuter, 0.4);
+        double simplifyEpsilon = 0.4;
+        Polygon searchSecondary = GeometryOps.simplify(secondaryOuter, simplifyEpsilon);
         Point2D centroid = GeometryOps.centroid(secondaryOuter);
         double[] bb0 = secondaryOuter.boundingBox();
         double pieceMaxDim = Math.max(bb0[2] - bb0[0], bb0[3] - bb0[1]);
 
         List<Polygon> searchOccupied = new ArrayList<>(occupiedPolys.size());
-        for (Polygon p : occupiedPolys) searchOccupied.add(GeometryOps.simplify(p, 0.4));
+        for (Polygon p : occupiedPolys) searchOccupied.add(GeometryOps.simplify(p, simplifyEpsilon));
 
         SpatialIndex searchIndex = new SpatialIndex(Math.max(1.0, pieceMaxDim));
         for (Polygon p : searchOccupied) searchIndex.insert(p);
 
+        // A peca simplificada e um poligono INSCRITO na peca real (Douglas-
+        // Peucker so remove pontos, nunca move os que ficam), entao pode ter
+        // bounding box ate simplifyEpsilon menor - encolhe a area util so pra
+        // busca por essa margem de seguranca (mesma tecnica e mesmo bug real
+        // corrigidos em SheetPacker#pack), senao a busca aceita candidatos
+        // flush com a margem que a validacao final em resolucao plena rejeita.
+        double searchMinX = usableMinX + simplifyEpsilon, searchMinY = usableMinY + simplifyEpsilon;
+        double searchMaxX = usableMaxX - simplifyEpsilon, searchMaxY = usableMaxY - simplifyEpsilon;
+        if (searchMaxX <= searchMinX || searchMaxY <= searchMinY) {
+            searchMinX = usableMinX;
+            searchMinY = usableMinY;
+            searchMaxX = usableMaxX;
+            searchMaxY = usableMaxY;
+        }
+
         List<SheetPacker.Placement> accepted = new ArrayList<>();
 
-        for (double gy = usableMinY; gy <= usableMaxY; gy += gridStepMm) {
-            for (double gx = usableMinX; gx <= usableMaxX; gx += gridStepMm) {
+        for (double gy = searchMinY; gy <= searchMaxY; gy += gridStepMm) {
+            for (double gx = searchMinX; gx <= searchMaxX; gx += gridStepMm) {
                 for (double rot : rotationsDeg) {
                     Point2D translation = new Point2D(gx - centroid.x, gy - centroid.y);
                     PlacedPieceInstance candidate = new PlacedPieceInstance(false, rot, translation);
                     Polygon poly = candidate.materialize(searchSecondary, centroid);
                     double[] bb = poly.boundingBox();
-                    if (bb[0] < usableMinX - 1e-6 || bb[1] < usableMinY - 1e-6
-                            || bb[2] > usableMaxX + 1e-6 || bb[3] > usableMaxY + 1e-6) {
+                    if (bb[0] < searchMinX - 1e-6 || bb[1] < searchMinY - 1e-6
+                            || bb[2] > searchMaxX + 1e-6 || bb[3] > searchMaxY + 1e-6) {
                         continue;
                     }
                     if (searchIndex.overlapsAny(poly)) continue;
@@ -123,7 +139,8 @@ public final class VoidFiller {
             }
         }
 
-        List<SheetPacker.Placement> validated = validateFullResolution(secondaryOuter, centroid, occupiedPolys, accepted, pieceMaxDim);
+        List<SheetPacker.Placement> validated = validateFullResolution(secondaryOuter, centroid, occupiedPolys, accepted, pieceMaxDim,
+                usableMinX, usableMinY, usableMaxX, usableMaxY);
         return new Result(validated, areaLiquida);
     }
 
@@ -134,12 +151,18 @@ public final class VoidFiller {
      * qualquer aceite que na verdade colida (nao deveria acontecer com
      * frequencia, dado o {@code gapMm} implicito da simplificacao, mas
      * nunca confia nisso sem checar - mesma disciplina de
-     * {@code SheetPacker#validateFullResolution}).
+     * {@code SheetPacker#validateFullResolution}). TAMBEM refaz a checagem
+     * de limite da area util em resolucao plena - a busca so verifica
+     * limite contra a peca SIMPLIFICADA, entao uma peca podia ser aceita
+     * mesmo que o contorno completo ultrapasse a margem (mesmo bug real
+     * encontrado e corrigido em {@code SheetPacker#validateFullResolution}).
      */
     private static List<SheetPacker.Placement> validateFullResolution(Polygon secondaryOuter, Point2D centroid,
                                                                         List<Polygon> occupiedPolys,
                                                                         List<SheetPacker.Placement> candidates,
-                                                                        double pieceMaxDim) {
+                                                                        double pieceMaxDim,
+                                                                        double usableMinX, double usableMinY,
+                                                                        double usableMaxX, double usableMaxY) {
         Polygon hullBase = GeometryOps.convexHull(secondaryOuter);
         HullIndex index = new HullIndex(Math.max(1.0, pieceMaxDim));
         for (Polygon p : occupiedPolys) index.insert(GeometryOps.convexHull(p), p);
@@ -148,6 +171,11 @@ public final class VoidFiller {
         for (SheetPacker.Placement c : candidates) {
             PlacedPieceInstance inst = new PlacedPieceInstance(c.mirror, c.rotationDeg, c.position);
             Polygon poly = inst.materialize(secondaryOuter, centroid);
+            double[] bb = poly.boundingBox();
+            if (bb[0] < usableMinX - 1e-6 || bb[1] < usableMinY - 1e-6
+                    || bb[2] > usableMaxX + 1e-6 || bb[3] > usableMaxY + 1e-6) {
+                continue;
+            }
             Polygon hull = inst.materialize(hullBase, centroid);
             if (index.overlapsAny(hull, poly)) continue;
             kept.add(c);

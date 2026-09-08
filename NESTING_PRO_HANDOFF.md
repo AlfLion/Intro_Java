@@ -84,12 +84,14 @@ Em vez de um classificador que adivinha o tipo de peça, gera candidatos por
 - `HoleFiller.fillHoles()`: part-in-part de verdade — encaixa uma peça
   pequena DENTRO do furo de cada instância aceita da peça grande (nunca
   gasta área extra da chapa). Ver item 3 do "falta fazer".
+- `SheetPacker.packBestSplit()`: além de deitada/em pé, considera cortar a
+  chapa em 2 tiras de tamanhos diferentes. Ver item 5 do "falta fazer".
 
 ### 4. Validação — tudo com geometria real, não só matemática
 - `DxfPipelineRegressionCheck`, `StrategySelectionDemo`, `SheetPackingDemo`,
-  `VoidFillingDemo`, `EncakitAnalysisDemo`, `RingKitDemo`: demos runnáveis
-  contra fixtures reais em `src/main/resources/fixtures/` (`15746A.DXF`,
-  `TRAP.DXF`, `BRACKET_COMPACTO.DXF`, `ENCAKIT.DXF`, `2CIRC.DXF`).
+  `VoidFillingDemo`, `EncakitAnalysisDemo`, `RingKitDemo`, `SplitConfigDemo`:
+  demos runnáveis contra fixtures reais em `src/main/resources/fixtures/`
+  (`15746A.DXF`, `TRAP.DXF`, `BRACKET_COMPACTO.DXF`, `ENCAKIT.DXF`, `2CIRC.DXF`).
 - Validações fortes conseguidas:
   - Trapézio: `cola-por-aresta` → 98,2% líquido (bate com a análise
     analítica: colar 2 trapézios pela perna forma paralelogramo ~100%
@@ -214,11 +216,45 @@ Em vez de um classificador que adivinha o tipo de peça, gera candidatos por
    revisitar a densidade de arco especificamente para o teste de colisão
    (não para área/parsing).
 
-5. **Múltiplas configurações de chapa além de deitada/em pé**. Hoje
-   `packBestOrientation` só testa as 2 orientações da MESMA chapa. Não
-   testa, por exemplo, cortar a chapa em 2 tiras de tamanhos diferentes,
-   nem combinar materiais (o "modo conjugado" que o app Básico já tem pra
-   Retângulo/Círculo).
+5. ~~Múltiplas configurações de chapa além de deitada/em pé~~ **FEITO
+   (corte em 2 tiras)**: `SheetPacker.packBestSplit(...)` — além de
+   `packBestOrientation` (chapa inteira, deitada/em pé), agora também
+   avalia cortar a chapa em 2 tiras de tamanhos diferentes (corte vertical
+   ou horizontal, ~18 frações candidatas) e empacotar cada uma
+   independentemente, escolhendo a configuração vencedora por previa
+   aritmética (`estimateBestOrientation`) antes de pagar o `pack()` de
+   verdade só uma vez — mesma lógica por trás do "modo conjugado" do app
+   Básico, aplicada dentro de uma única chapa física. Validado com
+   `SplitConfigDemo`: nenhuma das fixtures atuais mostrou ganho (todas já
+   aproveitam bem a chapa inteira nesses tamanhos específicos — resultado
+   esperado, não um bug). **Combinar materiais/chapas diferentes** (o modo
+   conjugado "de verdade" do Básico, com SKUs de chapa distintos) continua
+   fora de escopo.
+
+   **Dois bugs reais de segurança encontrados e corrigidos enquanto isso
+   era construído** (achados testando `packBestSplit` contra as fixtures
+   já validadas, não coisas que o usuário reportou):
+   - `validateFullResolution` (em `SheetPacker` e `VoidFiller`) só
+     reconferia COLISÃO em resolução plena, nunca LIMITE da área útil —
+     a busca só verifica limite contra a peça SIMPLIFICADA (Douglas-Peucker,
+     epsilon 0.4mm), que por natureza fica INSCRITA no contorno real
+     (DP só remove pontos, nunca move os que ficam), então podia aceitar
+     peça que, em resolução plena, ultrapassa a margem por até esse
+     epsilon. Achado com a 15746A: 2 peças de 106 furando a margem
+     esquerda em ~0,27mm. Corrigido: `validateFullResolution` agora
+     também descarta qualquer aceite fora dos limites reais.
+   - Consequência do fix acima: encolher só na validação final rejeitava
+     peças que estavam genuinamente no limite (ex.: o 2CIRC.DXF real tem
+     margem+raio=53mm EXATO, zero folga) — caiu de 20/20 pra 14/20 kits.
+     Causa raiz: a BUSCA usa a peça simplificada (que subestima a
+     extensão real em até o epsilon) pra decidir se cabe, então propunha
+     candidatos que a validação final (agora correta) rejeitava. Corrigido
+     encolhendo a área útil só na fase de BUSCA pelo mesmo epsilon
+     (`SEARCH_SIMPLIFY_EPSILON_MM`), tornando a busca conservadora o
+     bastante pra não propor o que não vai passar. Resultado: 2CIRC
+     voltou a 20/20, 15746A continua 106/106 mas agora com 0 violações
+     (antes do fix original nem sabíamos que existiam), bracket/trap
+     inalterados.
 
 6. ~~Sincronizar `tools/bancada.html` com o motor Java~~ **FEITO**:
    `packSheet` agora tem `tileRegion`/`tryBestRotationInRegion` portados

@@ -69,6 +69,21 @@ public final class SheetPacker {
 
     private static final double[] REUSE_ROTATIONS_DEG = {90.0, 180.0, 270.0};
 
+    /**
+     * Epsilon de simplificacao (Douglas-Peucker) usado na peca de busca.
+     * Como a peca simplificada e um poligono INSCRITO no contorno real (DP
+     * so remove pontos, nunca move os que ficam - entao arcos convexos
+     * "encolhem" pra dentro), a peca de busca pode ter bounding box ATE
+     * este epsilon menor que a peca real em qualquer direcao. Por isso a
+     * busca usa a area util encolhida por este valor (ver {@link #pack}) -
+     * sem isso, a busca aceita candidatos flush com a margem que, na
+     * resolucao plena, furam a margem de verdade (bug real encontrado com
+     * 15746A: 2 pecas de 106 furando ~0.27mm; e com 2CIRC.DXF: uma coluna
+     * inteira de pecas rente a margem rejeitada so na validacao final, em
+     * vez de nem ser proposta pela busca).
+     */
+    private static final double SEARCH_SIMPLIFY_EPSILON_MM = 0.4;
+
     public static final class Placement {
         public final boolean mirror;
         public final double rotationDeg;
@@ -166,6 +181,22 @@ public final class SheetPacker {
     public static QuickEstimate estimate(Polygon fullOuter, List<Polygon> holes, double sheetW, double sheetH,
                                           double marginMm, double gapMm, boolean mirrorAuthorized) {
         StrategySelector.Result sel = StrategySelector.select(fullOuter, gapMm);
+        return estimate(sel, fullOuter, holes, sheetW, sheetH, marginMm, gapMm, mirrorAuthorized);
+    }
+
+    /**
+     * Mesma previa, mas recebe a {@code StrategySelector.Result} ja calculada
+     * em vez de recalcular - a escolha de receita nao depende do tamanho da
+     * chapa, so da peca e do {@code gapMm}, entao quem for testar varios
+     * tamanhos de chapa candidatos pra MESMA peca (ex.: {@link #packBestSplit})
+     * pode calcular uma vez so e reusar. Bug de performance real encontrado
+     * nesta etapa: sem isso, {@code packBestSplit} recalculava a selecao de
+     * estrategia (cara pra pecas complexas) em CADA uma das ~36 chamadas de
+     * previa que faz pra avaliar candidatos de corte - 197s pra 15746A numa
+     * chapa so. Com o cache: a mesma chamada cai pra frações de segundo.
+     */
+    static QuickEstimate estimate(StrategySelector.Result sel, Polygon fullOuter, List<Polygon> holes,
+                                   double sheetW, double sheetH, double marginMm, double gapMm, boolean mirrorAuthorized) {
         NestingRecipe recipe = sel.chosen(mirrorAuthorized);
         boolean pending = sel.mirrorPending();
         double gain = sel.mirrorGainPct();
@@ -210,6 +241,12 @@ public final class SheetPacker {
     public static Result pack(Polygon fullOuter, List<Polygon> holes, double sheetW, double sheetH,
                                double marginMm, double gapMm, boolean mirrorAuthorized) {
         StrategySelector.Result sel = StrategySelector.select(fullOuter, gapMm);
+        return pack(sel, fullOuter, holes, sheetW, sheetH, marginMm, gapMm, mirrorAuthorized);
+    }
+
+    /** Mesma busca completa, mas reusando uma {@code StrategySelector.Result} ja calculada - ver {@link #estimate(StrategySelector.Result, Polygon, List, double, double, double, double, boolean)}. */
+    static Result pack(StrategySelector.Result sel, Polygon fullOuter, List<Polygon> holes, double sheetW, double sheetH,
+                        double marginMm, double gapMm, boolean mirrorAuthorized) {
         NestingRecipe recipe = sel.chosen(mirrorAuthorized);
         boolean pending = sel.mirrorPending();
         double gain = sel.mirrorGainPct();
@@ -226,7 +263,7 @@ public final class SheetPacker {
         // busca. Usa uma versao simplificada so pra essa fase (mesma tecnica
         // do StrategySelector); valida em resolucao PLENA no final, antes de
         // devolver o resultado.
-        Polygon searchOuter = GeometryOps.simplify(fullOuter, 0.4);
+        Polygon searchOuter = GeometryOps.simplify(fullOuter, SEARCH_SIMPLIFY_EPSILON_MM);
         Point2D centroid = GeometryOps.centroid(fullOuter);
         Point2D origin = new Point2D(0, 0);
         double[] fullBB = fullOuter.boundingBox();
@@ -247,11 +284,27 @@ public final class SheetPacker {
             return new Result(List.of(), recipe.strategyName, delta, sheetW * sheetH, areaLiquidaPeca, 0, 0, sheetW, sheetH, mirrorUsed, pending, gain);
         }
 
+        // A busca usa a peca SIMPLIFICADA, que pode ter bounding box ate
+        // SEARCH_SIMPLIFY_EPSILON_MM menor que a peca real (ver comentario
+        // da constante) - encolhe a area util so pra fase de busca por essa
+        // margem de seguranca, senao a busca propoe candidatos flush com a
+        // margem que a validacao final (resolucao plena) vai rejeitar.
+        double searchMinX = usableMinX + SEARCH_SIMPLIFY_EPSILON_MM;
+        double searchMinY = usableMinY + SEARCH_SIMPLIFY_EPSILON_MM;
+        double searchMaxX = usableMaxX - SEARCH_SIMPLIFY_EPSILON_MM;
+        double searchMaxY = usableMaxY - SEARCH_SIMPLIFY_EPSILON_MM;
+        if (searchMaxX <= searchMinX || searchMaxY <= searchMinY) {
+            searchMinX = usableMinX;
+            searchMinY = usableMinY;
+            searchMaxX = usableMaxX;
+            searchMaxY = usableMaxY;
+        }
+
         List<Placement> accepted = new ArrayList<>();
         List<Polygon> acceptedPolys = new ArrayList<>();
 
         tileRegion(searchOuter, centroid, alignedCell, av1, av2,
-                usableMinX, usableMinY, usableMaxX, usableMaxY, accepted, acceptedPolys);
+                searchMinX, searchMinY, searchMaxX, searchMaxY, accepted, acceptedPolys);
         int primaryCount = accepted.size();
 
         // Reaproveitamento de sobra: mesma receita girada 90/180/270,
@@ -264,7 +317,7 @@ public final class SheetPacker {
         // colisao real deixa espaco. Resolve a limitacao anterior (sobra
         // como retangulo so funcionava com vetores quase perpendiculares).
         tryBestRotationInRegion(searchOuter, centroid, alignedCell, av1, av2,
-                usableMinX, usableMinY, usableMaxX, usableMaxY, accepted, acceptedPolys);
+                searchMinX, searchMinY, searchMaxX, searchMaxY, accepted, acceptedPolys);
 
         // Validacao final em RESOLUCAO PLENA - a busca acima usou a peca
         // simplificada como atalho; nunca confia nisso sozinho (mesma licao
@@ -272,7 +325,8 @@ public final class SheetPacker {
         // acontecer, mas descarta em vez de arriscar). E o custo dominante em
         // pecas com muitos vizinhos proximos - ver {@link #estimate} pra uma
         // previa que nao paga esse custo (porque nao desenha posicao nenhuma).
-        List<Placement> validated = validateFullResolution(fullOuter, centroid, accepted, pieceMaxDim);
+        List<Placement> validated = validateFullResolution(fullOuter, centroid, accepted, pieceMaxDim,
+                usableMinX, usableMinY, usableMaxX, usableMaxY);
         int reuseCount = validated.size() - Math.min(primaryCount, validated.size());
         return new Result(validated, recipe.strategyName, delta, sheetW * sheetH, areaLiquidaPeca,
                 Math.min(primaryCount, validated.size()), reuseCount, sheetW, sheetH, mirrorUsed, pending, gain);
@@ -290,15 +344,31 @@ public final class SheetPacker {
      * completa. So confirma com o teste exato quando os fechos SE
      * sobrepoem. Isso era o custo dominante do pipeline antes desta
      * otimizacao (~10-14s pra ~650 pecas do bracket).
+     *
+     * TAMBEM refaz a checagem de LIMITE da area util em resolucao plena -
+     * bug real encontrado nesta etapa: a busca so verifica limite contra a
+     * peca SIMPLIFICADA (epsilon 0.4mm), entao uma peca podia ser aceita
+     * mesmo que o contorno completo (nao a versao simplificada) ultrapasse
+     * a margem por ate a espessura da simplificacao. Achado com a fixture
+     * 15746A: 2 pecas de 106 furando a margem esquerda em ~0.27mm (dentro
+     * do epsilon de 0.4mm, como esperado). Descarta em vez de arriscar,
+     * igual a colisao.
      */
     private static List<Placement> validateFullResolution(Polygon fullOuter, Point2D centroid,
-                                                            List<Placement> accepted, double pieceMaxDim) {
+                                                            List<Placement> accepted, double pieceMaxDim,
+                                                            double usableMinX, double usableMinY,
+                                                            double usableMaxX, double usableMaxY) {
         Polygon hullBase = GeometryOps.convexHull(fullOuter);
         List<Placement> kept = new ArrayList<>(accepted.size());
         HullIndex index = new HullIndex(Math.max(1.0, pieceMaxDim));
         for (Placement p : accepted) {
             PlacedPieceInstance inst = new PlacedPieceInstance(p.mirror, p.rotationDeg, p.position);
             Polygon poly = inst.materialize(fullOuter, centroid);
+            double[] bb = poly.boundingBox();
+            if (bb[0] < usableMinX - 1e-6 || bb[1] < usableMinY - 1e-6
+                    || bb[2] > usableMaxX + 1e-6 || bb[3] > usableMaxY + 1e-6) {
+                continue;
+            }
             Polygon hull = inst.materialize(hullBase, centroid);
             if (index.overlapsAny(hull, poly)) continue;
             kept.add(p);
@@ -322,11 +392,19 @@ public final class SheetPacker {
     public static Result packBestOrientation(Polygon fullOuter, List<Polygon> holes,
                                               double sheetW, double sheetH, double marginMm, double gapMm,
                                               boolean mirrorAuthorized) {
-        Result deitada = pack(fullOuter, holes, sheetW, sheetH, marginMm, gapMm, mirrorAuthorized);
+        StrategySelector.Result sel = StrategySelector.select(fullOuter, gapMm);
+        return packBestOrientation(sel, fullOuter, holes, sheetW, sheetH, marginMm, gapMm, mirrorAuthorized);
+    }
+
+    /** Mesma escolha de orientacao, reusando uma {@code StrategySelector.Result} ja calculada. */
+    static Result packBestOrientation(StrategySelector.Result sel, Polygon fullOuter, List<Polygon> holes,
+                                       double sheetW, double sheetH, double marginMm, double gapMm,
+                                       boolean mirrorAuthorized) {
+        Result deitada = pack(sel, fullOuter, holes, sheetW, sheetH, marginMm, gapMm, mirrorAuthorized);
         if (Math.abs(sheetW - sheetH) < 1e-9) {
             return deitada;
         }
-        Result emPe = pack(fullOuter, holes, sheetH, sheetW, marginMm, gapMm, mirrorAuthorized);
+        Result emPe = pack(sel, fullOuter, holes, sheetH, sheetW, marginMm, gapMm, mirrorAuthorized);
         return emPe.placements.size() > deitada.placements.size() ? emPe : deitada;
     }
 
@@ -345,11 +423,19 @@ public final class SheetPacker {
     public static QuickEstimate estimateBestOrientation(Polygon fullOuter, List<Polygon> holes,
                                                           double sheetW, double sheetH, double marginMm, double gapMm,
                                                           boolean mirrorAuthorized) {
-        QuickEstimate deitada = estimate(fullOuter, holes, sheetW, sheetH, marginMm, gapMm, mirrorAuthorized);
+        StrategySelector.Result sel = StrategySelector.select(fullOuter, gapMm);
+        return estimateBestOrientation(sel, fullOuter, holes, sheetW, sheetH, marginMm, gapMm, mirrorAuthorized);
+    }
+
+    /** Mesma escolha de orientacao, reusando uma {@code StrategySelector.Result} ja calculada. */
+    static QuickEstimate estimateBestOrientation(StrategySelector.Result sel, Polygon fullOuter, List<Polygon> holes,
+                                                  double sheetW, double sheetH, double marginMm, double gapMm,
+                                                  boolean mirrorAuthorized) {
+        QuickEstimate deitada = estimate(sel, fullOuter, holes, sheetW, sheetH, marginMm, gapMm, mirrorAuthorized);
         if (Math.abs(sheetW - sheetH) < 1e-9) {
             return deitada;
         }
-        QuickEstimate emPe = estimate(fullOuter, holes, sheetH, sheetW, marginMm, gapMm, mirrorAuthorized);
+        QuickEstimate emPe = estimate(sel, fullOuter, holes, sheetH, sheetW, marginMm, gapMm, mirrorAuthorized);
         return emPe.estimatedCount > deitada.estimatedCount ? emPe : deitada;
     }
 
@@ -385,10 +471,23 @@ public final class SheetPacker {
      * cada peca da tira B pelo deslocamento da tira - e ainda assim
      * confere colisao real entre as 2 tiras combinadas antes de devolver
      * (nunca confia so na separacao geometrica das regioes).
+     *
+     * A escolha de receita (qual dos 3 mecanismos, qual angulo) so depende
+     * da PECA e do {@code gapMm} - nunca do tamanho da chapa. Por isso
+     * calcula {@code StrategySelector.select} UMA VEZ so aqui em cima e
+     * reusa em todas as chamadas internas de estimativa/empacotamento pras
+     * ~20 fracoes de corte candidatas - bug de performance real encontrado
+     * nesta etapa: sem esse cache, cada uma das ~36 chamadas de previa
+     * recalculava a selecao de estrategia do zero, e pra uma peca complexa
+     * (15746A) isso levou 197 SEGUNDOS numa unica chamada. Com o cache cai
+     * pra fracoes de segundo (so a previa aritmetica de verdade, sem
+     * recalcular a receita).
      */
     public static SplitResult packBestSplit(Polygon fullOuter, List<Polygon> holes,
                                              double sheetW, double sheetH, double marginMm, double gapMm) {
-        QuickEstimate baseline = estimateBestOrientation(fullOuter, holes, sheetW, sheetH, marginMm, gapMm);
+        StrategySelector.Result sel = StrategySelector.select(fullOuter, gapMm);
+
+        QuickEstimate baseline = estimateBestOrientation(sel, fullOuter, holes, sheetW, sheetH, marginMm, gapMm, false);
         double bestEstCount = baseline.estimatedCount;
         boolean bestVertical = false;
         double bestSplitAt = -1;
@@ -397,8 +496,8 @@ public final class SheetPacker {
             double wA = sheetW * f;
             double wB = sheetW - wA - gapMm;
             if (wA > 2 * marginMm && wB > 2 * marginMm) {
-                double total = estimateBestOrientation(fullOuter, holes, wA, sheetH, marginMm, gapMm).estimatedCount
-                        + estimateBestOrientation(fullOuter, holes, wB, sheetH, marginMm, gapMm).estimatedCount;
+                double total = estimateBestOrientation(sel, fullOuter, holes, wA, sheetH, marginMm, gapMm, false).estimatedCount
+                        + estimateBestOrientation(sel, fullOuter, holes, wB, sheetH, marginMm, gapMm, false).estimatedCount;
                 if (total > bestEstCount) {
                     bestEstCount = total;
                     bestVertical = true;
@@ -408,8 +507,8 @@ public final class SheetPacker {
             double hA = sheetH * f;
             double hB = sheetH - hA - gapMm;
             if (hA > 2 * marginMm && hB > 2 * marginMm) {
-                double total = estimateBestOrientation(fullOuter, holes, sheetW, hA, marginMm, gapMm).estimatedCount
-                        + estimateBestOrientation(fullOuter, holes, sheetW, hB, marginMm, gapMm).estimatedCount;
+                double total = estimateBestOrientation(sel, fullOuter, holes, sheetW, hA, marginMm, gapMm, false).estimatedCount
+                        + estimateBestOrientation(sel, fullOuter, holes, sheetW, hB, marginMm, gapMm, false).estimatedCount;
                 if (total > bestEstCount) {
                     bestEstCount = total;
                     bestVertical = false;
@@ -419,7 +518,7 @@ public final class SheetPacker {
         }
 
         if (bestSplitAt < 0) {
-            return new SplitResult(packBestOrientation(fullOuter, holes, sheetW, sheetH, marginMm, gapMm), "sem divisao");
+            return new SplitResult(packBestOrientation(sel, fullOuter, holes, sheetW, sheetH, marginMm, gapMm, false), "sem divisao");
         }
 
         Result rA, rB;
@@ -427,14 +526,14 @@ public final class SheetPacker {
         String desc;
         if (bestVertical) {
             double wA = bestSplitAt, wB = sheetW - wA - gapMm;
-            rA = packBestOrientation(fullOuter, holes, wA, sheetH, marginMm, gapMm);
-            rB = packBestOrientation(fullOuter, holes, wB, sheetH, marginMm, gapMm);
+            rA = packBestOrientation(sel, fullOuter, holes, wA, sheetH, marginMm, gapMm, false);
+            rB = packBestOrientation(sel, fullOuter, holes, wB, sheetH, marginMm, gapMm, false);
             offsetX = wA + gapMm;
             desc = String.format("vertical em x=%.1fmm (tiras %.1f + %.1fmm)", wA, wA, wB);
         } else {
             double hA = bestSplitAt, hB = sheetH - hA - gapMm;
-            rA = packBestOrientation(fullOuter, holes, sheetW, hA, marginMm, gapMm);
-            rB = packBestOrientation(fullOuter, holes, sheetW, hB, marginMm, gapMm);
+            rA = packBestOrientation(sel, fullOuter, holes, sheetW, hA, marginMm, gapMm, false);
+            rB = packBestOrientation(sel, fullOuter, holes, sheetW, hB, marginMm, gapMm, false);
             offsetY = hA + gapMm;
             desc = String.format("horizontal em y=%.1fmm (tiras %.1f + %.1fmm)", hA, hA, hB);
         }
@@ -453,7 +552,8 @@ public final class SheetPacker {
         double pieceMaxDim = Math.max(fullOuter.boundingBox()[2] - fullOuter.boundingBox()[0],
                 fullOuter.boundingBox()[3] - fullOuter.boundingBox()[1]);
         Point2D centroid = GeometryOps.centroid(fullOuter);
-        List<Placement> validated = validateFullResolution(fullOuter, centroid, combined, pieceMaxDim);
+        List<Placement> validated = validateFullResolution(fullOuter, centroid, combined, pieceMaxDim,
+                marginMm, marginMm, sheetW - marginMm, sheetH - marginMm);
 
         double areaLiquidaPeca = rA.piecesNetAreaMm2 > 0 ? rA.piecesNetAreaMm2 : rB.piecesNetAreaMm2;
         int primaryCount = rA.primaryCount + rB.primaryCount;
