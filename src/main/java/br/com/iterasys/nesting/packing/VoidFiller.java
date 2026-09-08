@@ -20,9 +20,17 @@ import java.util.List;
  * Estrategia: varredura em grade (nao rede/lattice, porque o vao nao tem
  * forma regular) tentando algumas rotacoes fixas em cada ponto da grade;
  * aceita o primeiro encaixe sem colisao e passa pro proximo ponto -
- * guloso, nao otimo, mas simples e correto (cada aceite e validado por
- * colisao geometrica real contra TUDO que ja foi aceito antes, incluindo
- * outras copias da propria peca pequena ja encaixadas no mesmo vao).
+ * guloso, nao otimo, mas simples e correto.
+ *
+ * Mesma tecnica de {@code SheetPacker#pack}: a varredura em si usa geometria
+ * SIMPLIFICADA (Douglas-Peucker) tanto da peca pequena quanto das pecas ja
+ * ocupadas - testar milhares de posicoes de grade em resolucao plena contra
+ * pecas reais complexas (centenas de vertices por causa da discretizacao
+ * fina de arco) nao termina em tempo util (medido: nao terminou em 2min
+ * contra uma peca de 919 vertices, caso real do ENCAKIT.DXF). So a
+ * validacao FINAL (dos poucos candidatos que a busca simplificada aceitou)
+ * roda em resolucao plena de verdade, nunca confiando so na aproximacao -
+ * mesma disciplina do resto do motor.
  *
  * Limitacao conhecida: nao aplica o {@code gapMm} como folga entre a peca
  * pequena e as pecas grandes vizinhas (so garante ZERO sobreposicao real,
@@ -83,19 +91,16 @@ public final class VoidFiller {
             return new Result(List.of(), areaLiquida);
         }
 
+        Polygon searchSecondary = GeometryOps.simplify(secondaryOuter, 0.4);
         Point2D centroid = GeometryOps.centroid(secondaryOuter);
         double[] bb0 = secondaryOuter.boundingBox();
         double pieceMaxDim = Math.max(bb0[2] - bb0[0], bb0[3] - bb0[1]);
 
-        // Nao usa HullIndex aqui (ao contrario de SheetPacker#validateFullResolution):
-        // a peca "pequena" que preenche vaos costuma ser tao simples (poucos
-        // vertices, muitas vezes ja convexa) que calcular/testar o fecho dela
-        // e puro overhead sem ganho - medido: deixou este metodo MAIS LENTO
-        // (8.5s -> 11s no fixture do bracket). O SpatialIndex simples ja
-        // filtra pela distancia (bounding box + grade); o teste exato restante
-        // e barato porque o lado pequeno da comparacao tem poucos vertices.
-        SpatialIndex index = new SpatialIndex(Math.max(1.0, pieceMaxDim));
-        for (Polygon p : occupiedPolys) index.insert(p);
+        List<Polygon> searchOccupied = new ArrayList<>(occupiedPolys.size());
+        for (Polygon p : occupiedPolys) searchOccupied.add(GeometryOps.simplify(p, 0.4));
+
+        SpatialIndex searchIndex = new SpatialIndex(Math.max(1.0, pieceMaxDim));
+        for (Polygon p : searchOccupied) searchIndex.insert(p);
 
         List<SheetPacker.Placement> accepted = new ArrayList<>();
 
@@ -104,19 +109,50 @@ public final class VoidFiller {
                 for (double rot : rotationsDeg) {
                     Point2D translation = new Point2D(gx - centroid.x, gy - centroid.y);
                     PlacedPieceInstance candidate = new PlacedPieceInstance(false, rot, translation);
-                    Polygon poly = candidate.materialize(secondaryOuter, centroid);
+                    Polygon poly = candidate.materialize(searchSecondary, centroid);
                     double[] bb = poly.boundingBox();
                     if (bb[0] < usableMinX - 1e-6 || bb[1] < usableMinY - 1e-6
                             || bb[2] > usableMaxX + 1e-6 || bb[3] > usableMaxY + 1e-6) {
                         continue;
                     }
-                    if (index.overlapsAny(poly)) continue;
+                    if (searchIndex.overlapsAny(poly)) continue;
                     accepted.add(new SheetPacker.Placement(false, rot, translation));
-                    index.insert(poly);
+                    searchIndex.insert(poly);
                     break;
                 }
             }
         }
-        return new Result(accepted, areaLiquida);
+
+        List<SheetPacker.Placement> validated = validateFullResolution(secondaryOuter, centroid, occupiedPolys, accepted, pieceMaxDim);
+        return new Result(validated, areaLiquida);
+    }
+
+    /**
+     * Confirma em resolucao PLENA os candidatos que a busca simplificada
+     * aceitou - contra as pecas ocupadas (tambem em resolucao plena) e
+     * contra as outras pecas pequenas ja confirmadas antes. Descarta
+     * qualquer aceite que na verdade colida (nao deveria acontecer com
+     * frequencia, dado o {@code gapMm} implicito da simplificacao, mas
+     * nunca confia nisso sem checar - mesma disciplina de
+     * {@code SheetPacker#validateFullResolution}).
+     */
+    private static List<SheetPacker.Placement> validateFullResolution(Polygon secondaryOuter, Point2D centroid,
+                                                                        List<Polygon> occupiedPolys,
+                                                                        List<SheetPacker.Placement> candidates,
+                                                                        double pieceMaxDim) {
+        Polygon hullBase = GeometryOps.convexHull(secondaryOuter);
+        HullIndex index = new HullIndex(Math.max(1.0, pieceMaxDim));
+        for (Polygon p : occupiedPolys) index.insert(GeometryOps.convexHull(p), p);
+
+        List<SheetPacker.Placement> kept = new ArrayList<>(candidates.size());
+        for (SheetPacker.Placement c : candidates) {
+            PlacedPieceInstance inst = new PlacedPieceInstance(c.mirror, c.rotationDeg, c.position);
+            Polygon poly = inst.materialize(secondaryOuter, centroid);
+            Polygon hull = inst.materialize(hullBase, centroid);
+            if (index.overlapsAny(hull, poly)) continue;
+            kept.add(c);
+            index.insert(hull, poly);
+        }
+        return kept;
     }
 }

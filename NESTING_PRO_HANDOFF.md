@@ -83,9 +83,10 @@ Em vez de um classificador que adivinha o tipo de peça, gera candidatos por
   a cada aceite. Ver item 1 do "falta fazer" pra limitações conhecidas.
 
 ### 4. Validação — tudo com geometria real, não só matemática
-- `DxfPipelineRegressionCheck`, `StrategySelectionDemo`, `SheetPackingDemo`:
-  demos runnáveis contra fixtures reais em `src/main/resources/fixtures/`
-  (`15746A.DXF`, `TRAP.DXF`, `BRACKET_COMPACTO.DXF`).
+- `DxfPipelineRegressionCheck`, `StrategySelectionDemo`, `SheetPackingDemo`,
+  `VoidFillingDemo`, `EncakitAnalysisDemo`: demos runnáveis contra fixtures
+  reais em `src/main/resources/fixtures/` (`15746A.DXF`, `TRAP.DXF`,
+  `BRACKET_COMPACTO.DXF`, `ENCAKIT.DXF`).
 - Validações fortes conseguidas:
   - Trapézio: `cola-por-aresta` → 98,2% líquido (bate com a análise
     analítica: colar 2 trapézios pela perna forma paralelogramo ~100%
@@ -124,19 +125,28 @@ Em vez de um classificador que adivinha o tipo de peça, gera candidatos por
 
 ## DETALHAMENTO DO QUE FALTA FAZER
 
-1. ~~Void-filling automático~~ **FEITO** (mecanismo genérico, ainda sem
-   validação contra kit real): `packing/VoidFiller.fillVoids(...)` — varredura
-   em grade (não rede/lattice, porque o vão não tem forma regular) testando
-   algumas rotações fixas em cada ponto, aceita o primeiro encaixe sem
-   colisão real (contra as peças grandes E contra as pequenas já aceitas)
-   e segue pro próximo ponto. Guloso, não ótimo, mas correto — validado
-   com `VoidFillingDemo` (peça pequena sintética 6×6mm nos vãos do
-   BRACKET_COMPACTO.DXF: 840 encaixadas, 0 colisões, aproveitamento
-   64,5%→67,8%). **Limitação conhecida**: não aplica `gapMm` como folga
-   entre peça pequena e peça grande (só garante zero sobreposição real,
-   que é sempre seguro, mas pode encostar sem vão nenhum) — documentado
-   no Javadoc da classe. Falta: nenhum exemplo real de kit (ENCAKIT.DXF)
-   foi testado ainda — ver item 3 abaixo.
+1. ~~Void-filling automático~~ **FEITO e validado contra kit real**:
+   `packing/VoidFiller.fillVoids(...)` — varredura em grade (não rede/lattice,
+   porque o vão não tem forma regular) testando algumas rotações fixas em
+   cada ponto. Reescrito nesta etapa pra usar a mesma técnica de
+   `SheetPacker#pack` (busca em geometria SIMPLIFICADA, validação final em
+   resolução PLENA) depois que a primeira versão (testava resolução plena
+   direto na busca) não terminava em tempo útil (>2min) contra o
+   ENCAKIT.DXF real — a peça "grande" tem 919 vértices e a "média" 738
+   (discretização fina de arco), testar milhares de posições de grade nessa
+   resolução é inviável. Com a correção: **368ms** pro mesmo caso (antes
+   não terminava). **Limitação conhecida**: não aplica `gapMm` como folga
+   entre peça pequena e peça grande (só garante zero sobreposição real) —
+   documentado no Javadoc.
+   **Validado contra o ENCAKIT.DXF real do usuário** (ver `EncakitAnalysisDemo`,
+   fixture agora commitada): peça grande (27 encaixadas, 33,6%) + peça
+   média no vão (39 encaixadas, 385ms) → 48,7% total numa chapa 600×400mm,
+   **0 colisões reais**. `NestedKitAuditor` confirmou que o padrão manual
+   real do usuário é interlock θ/θ+180° sem espelho pras duas peças — e o
+   motor, analisando cada peça sozinha, encontra `interlock-centroide` como
+   2º colocado a **0,08% de distância** do vencedor (`cola-por-aresta`) pra
+   peça grande — ou seja, o motor concorda essencialmente com a escolha
+   manual do usuário, mesmo sem ver o padrão de antemão.
 
 2. ~~Regra de negócio do espelhamento — falta o fluxo, não a detecção~~
    **FEITO no motor e na bancada**: `StrategySelector.Result.chosen(mirrorAuthorized)`
@@ -150,10 +160,14 @@ Em vez de um classificador que adivinha o tipo de peça, gera candidatos por
    nunca foi validado contra geometria real — só contra 9 casos sintéticos
    (Java) + os mesmos 9 replicados em JS, todos passando.
 
-3. **Peça com furo interno de verdade (part-in-part)**. Nenhum exemplo do
-   usuário até agora tinha um furo grande o bastante pra caber outra peça
-   dentro — só furos de parafuso pequenos. Precisa de um exemplo novo pra
-   testar isso de verdade.
+3. ~~Peça com furo interno de verdade (part-in-part)~~ **Esclarecido, não
+   é bem o caso do ENCAKIT.DXF**: as duas peças do kit real (commitado
+   agora) têm furos, mas todos pequenos (parafuso) — a peça "média" não
+   fica DENTRO de um furo da peça "grande", fica no vão externo entre
+   cópias dela (mesmo padrão void-filling do item 1, não part-in-part de
+   verdade). Ainda nenhum exemplo real tem um furo grande o bastante pra
+   caber outra peça inteira dentro dele — se precisar testar isso
+   especificamente, ainda precisa de um exemplo novo.
 
 4. ~~Performance da validação final em resolução plena~~ **PARCIALMENTE
    FEITO**: `GeometryOps.convexHull()` (monotone chain de Andrew) +
@@ -209,14 +223,20 @@ Em vez de um classificador que adivinha o tipo de peça, gera candidatos por
   Fixture comitada como `BRACKET_COMPACTO.DXF`.
 - `OUTRAPRT` — bracket em L maior, assimétrico, ângulo ótimo não-redondo
   (76°). Não comitado como fixture ainda.
-- `ENCAKIT` — kit peça-grande + peça-pequena-no-vão, 60,7% líquido medido
-  manualmente via auditoria. Não comitado como fixture ainda.
+- `ENCAKIT` — kit peça-grande (3030mm² bruta, 3 furos) + peça-média-no-vão
+  (1024mm² bruta, 3 furos), 60,7% líquido medido manualmente via auditoria
+  no bbox do kit isolado (~151×83mm). **Fixture comitada** como
+  `ENCAKIT.DXF` — é o DXF do kit inteiro já nesteado (2+2), não peças
+  isoladas; `EncakitAnalysisDemo` extrai as 2 peças canônicas por
+  contenção geométrica antes de analisar. Padrão real confirmado via
+  `NestedKitAuditor`: as 2 cópias de cada peça usam interlock θ/θ+180°
+  sem espelho.
 - `TRAP/TRAPENC` — trapézio isósceles simples, sem furo. Fixture comitada
   como `TRAP.DXF`.
 
-Se quiser mais fixtures de regressão permanentes, os DXFs originais
-(OUTRAPRT, ENCAKIT) estão só no histórico de upload de sessões anteriores —
-peça pro usuário reenviar se for útil.
+Se quiser mais fixtures de regressão permanentes, o DXF original do
+OUTRAPRT está só no histórico de upload de sessões anteriores — peça pro
+usuário reenviar se for útil.
 
 ## Como compilar e testar (sem Gradle configurado com dependências)
 
