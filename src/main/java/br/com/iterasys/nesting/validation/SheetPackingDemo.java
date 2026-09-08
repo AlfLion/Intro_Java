@@ -28,20 +28,19 @@ import java.util.List;
  * isolada, mas so ~61-72% numa chapa de poucos metros porque sobra uma
  * faixa de borda.
  *
- * O {@code SheetPacker} agora tenta reaproveitar essa sobra com a mesma
- * receita girada 90/180/270 (como no Layout C da 15746A) - funciona quando
- * a sobra e uma faixa retangular limpa (testado com o TRAP.DXF numa chapa
- * alta: +2 pecas), mas ainda nao quando o 2o vetor de rede da receita
- * vencedora fica diagonal em vez de perpendicular ao 1o (caso do
- * BRACKET_COMPACTO.DXF com "cola-por-aresta" - reaproveitamento fica 0,
- * ver limitacao documentada em {@code SheetPacker}).
+ * O {@code SheetPacker} tenta reaproveitar essa sobra com a mesma receita
+ * girada 90/180/270 (como no Layout C da 15746A), escaneando a area util
+ * inteira de novo em vez de supor o formato da sobra - funciona tanto pra
+ * sobra em faixa limpa (TRAP.DXF numa chapa grande: 61->71 pecas) quanto
+ * pra sobra irregular de um vetor de rede diagonal (BRACKET_COMPACTO.DXF
+ * com "cola-por-aresta": 646->648 pecas).
  */
 public final class SheetPackingDemo {
 
     public static void main(String[] args) throws IOException {
         report("/fixtures/BRACKET_COMPACTO.DXF", 914, 1010, 3, 2);
         report("/fixtures/TRAP.DXF", 1200, 2200, 5, 3);
-        report("/fixtures/TRAP.DXF", 1200, 2600, 5, 3);
+        report("/fixtures/TRAP.DXF", 3200, 4200, 5, 3);
     }
 
     private static void report(String resource, double sheetW, double sheetH, double marginMm, double gapMm) throws IOException {
