@@ -304,7 +304,7 @@ public final class SheetPacker {
         List<Polygon> acceptedPolys = new ArrayList<>();
 
         tileRegion(searchOuter, centroid, alignedCell, av1, av2,
-                searchMinX, searchMinY, searchMaxX, searchMaxY, accepted, acceptedPolys);
+                searchMinX, searchMinY, searchMaxX, searchMaxY, accepted, acceptedPolys, gapMm);
         int primaryCount = accepted.size();
 
         // Reaproveitamento de sobra: mesma receita girada 90/180/270,
@@ -317,7 +317,7 @@ public final class SheetPacker {
         // colisao real deixa espaco. Resolve a limitacao anterior (sobra
         // como retangulo so funcionava com vetores quase perpendiculares).
         tryBestRotationInRegion(searchOuter, centroid, alignedCell, av1, av2,
-                searchMinX, searchMinY, searchMaxX, searchMaxY, accepted, acceptedPolys);
+                searchMinX, searchMinY, searchMaxX, searchMaxY, accepted, acceptedPolys, gapMm);
 
         // Validacao final em RESOLUCAO PLENA - a busca acima usou a peca
         // simplificada como atalho; nunca confia nisso sozinho (mesma licao
@@ -583,7 +583,7 @@ public final class SheetPacker {
     private static void tryBestRotationInRegion(Polygon pieceOuter, Point2D centroid,
                                                  List<PlacedPieceInstance> baseCell, Point2D baseV1, Point2D baseV2,
                                                  double regionMinX, double regionMinY, double regionMaxX, double regionMaxY,
-                                                 List<Placement> accepted, List<Polygon> acceptedPolys) {
+                                                 List<Placement> accepted, List<Polygon> acceptedPolys, double gapMm) {
         Point2D origin = new Point2D(0, 0);
         List<Placement> bestNew = null;
         List<Polygon> bestNewPolys = null;
@@ -597,7 +597,7 @@ public final class SheetPacker {
             List<Polygon> trialPolys = new ArrayList<>(acceptedPolys);
             int before = trialPolys.size();
             tileRegion(pieceOuter, centroid, rotCell, rv1, rv2,
-                    regionMinX, regionMinY, regionMaxX, regionMaxY, trialAccepted, trialPolys);
+                    regionMinX, regionMinY, regionMaxX, regionMaxY, trialAccepted, trialPolys, gapMm);
 
             if (bestNew == null || trialAccepted.size() > bestNew.size()) {
                 bestNew = trialAccepted;
@@ -610,11 +610,23 @@ public final class SheetPacker {
         }
     }
 
-    /** Ladrilha uma celula (com os vetores de rede ja na orientacao desejada) dentro de um retangulo. */
+    /**
+     * Ladrilha uma celula (com os vetores de rede ja na orientacao desejada)
+     * dentro de um retangulo. Bug real corrigido nesta sessao: o
+     * reaproveitamento de sobra (chamado por
+     * {@link #tryBestRotationInRegion}) so testava SOBREPOSICAO ZERO contra
+     * o que ja foi aceito, nunca o {@code gapMm} pedido - podia empurrar
+     * peca reaproveitada a ~1mm de uma peca primaria mesmo pedindo 50mm de
+     * folga. Corrige: aceita candidato so se, alem de nao sobrepor, a
+     * distancia real ate cada vizinho aceito nas celulas proximas do indice
+     * espacial for >= gapMm (com tolerancia). So opera em geometria
+     * SIMPLIFICADA (poucos vertices), entao o teste extra e barato mesmo
+     * chamado milhares de vezes.
+     */
     private static void tileRegion(Polygon pieceOuter, Point2D centroid,
                                     List<PlacedPieceInstance> cellInstances, Point2D v1, Point2D v2,
                                     double regionMinX, double regionMinY, double regionMaxX, double regionMaxY,
-                                    List<Placement> accepted, List<Polygon> acceptedPolys) {
+                                    List<Placement> accepted, List<Polygon> acceptedPolys, double gapMm) {
         double regionW = regionMaxX - regionMinX;
         double regionH = regionMaxY - regionMinY;
         if (regionW <= 0 || regionH <= 0) return;
@@ -634,6 +646,7 @@ public final class SheetPacker {
         double diag = Math.hypot(regionW, regionH);
         int rangeN = (int) Math.ceil(diag / Math.max(1.0, Math.hypot(v1.x, v1.y))) + 2;
         int rangeM = (int) Math.ceil(diag / Math.max(1.0, Math.hypot(v2.x, v2.y))) + 2;
+        double gap = Math.max(0, gapMm);
 
         SpatialIndex index = new SpatialIndex(Math.max(1.0, pieceMaxDim));
         for (Polygon p : acceptedPolys) index.insert(p);
@@ -651,7 +664,8 @@ public final class SheetPacker {
                             || bb[2] > regionMaxX + 1e-6 || bb[3] > regionMaxY + 1e-6) {
                         continue;
                     }
-                    if (index.overlapsAny(poly)) continue;
+                    double[] paddedBb = {bb[0] - gap, bb[1] - gap, bb[2] + gap, bb[3] + gap};
+                    if (index.overlapsAny(poly, paddedBb, gap)) continue;
                     accepted.add(new Placement(candidate.mirror, candidate.rotationDeg, candidate.translation));
                     acceptedPolys.add(poly);
                     index.insert(poly);

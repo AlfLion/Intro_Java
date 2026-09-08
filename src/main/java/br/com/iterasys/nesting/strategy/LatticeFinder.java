@@ -75,7 +75,7 @@ public final class LatticeFinder {
             // colide (bug real encontrado testando contra TRAP.DXF: um v2
             // quase antiparalelo a v1 passava nos dois testes isolados e
             // dava area/peca impossivel, porque v1+v2 colidia de verdade).
-            if (!diagonalNeighborsValid(cell, v1, cand, maxDistance)) continue;
+            if (!diagonalNeighborsValid(cell, v1, cand, gapMm)) continue;
             bestCross = cross;
             i2 = i;
             bestV2 = cand;
@@ -85,16 +85,30 @@ public final class LatticeFinder {
         return new Lattice(v1, bestV2, Math.abs(v1.x * bestV2.y - v1.y * bestV2.x));
     }
 
-    private static boolean diagonalNeighborsValid(List<Polygon> cell, Point2D v1, Point2D v2, double maxDistance) {
+    // v1 e v2 ja garantem gapMm de folga nas SUAS proprias direcoes (a
+    // distancia de contato + gapMm foi usada pra construir cada um) - mas o
+    // vizinho DIAGONAL (v1+v2 ou v1-v2) e uma combinacao das duas, entao a
+    // folga nessa direcao combinada nao e automatica so por v1 e v2 terem
+    // folga isolada. Bug real encontrado testando espacamento grande contra
+    // peca em L: o motor aceitava um v2 cujo vizinho diagonal so nao se
+    // sobrepunha (folga zero ou quase), nao respeitando o gapMm pedido.
+    // Corrige exigindo folga real (nao so ausencia de sobreposicao) na
+    // direcao diagonal tambem.
+    private static boolean diagonalNeighborsValid(List<Polygon> cell, Point2D v1, Point2D v2, double gapMm) {
         Point2D sum = new Point2D(v1.x + v2.x, v1.y + v2.y);
         Point2D diff = new Point2D(v1.x - v2.x, v1.y - v2.y);
-        return !overlapsAt(cell, sum) && !overlapsAt(cell, diff);
+        return !tooCloseAt(cell, sum, gapMm) && !tooCloseAt(cell, diff, gapMm);
     }
 
-    private static boolean overlapsAt(List<Polygon> cell, Point2D offset) {
+    private static boolean tooCloseAt(List<Polygon> cell, Point2D offset, double gapMm) {
         List<Polygon> moved = new java.util.ArrayList<>(cell.size());
         for (Polygon p : cell) moved.add(p.translated(offset));
-        return GeometryOps.overlapsAny(cell, moved);
+        for (Polygon a : cell) {
+            for (Polygon b : moved) {
+                if (GeometryOps.closerThan(a, b, Math.max(0, gapMm - 0.05))) return true;
+            }
+        }
+        return false;
     }
 
     private static Point2D vector(double len, double angDeg) {

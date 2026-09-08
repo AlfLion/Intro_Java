@@ -44,9 +44,25 @@ final class SpatialIndex {
 
     boolean overlapsAny(Polygon candidate) {
         double[] bb = candidate.boundingBox();
-        int cx0 = cellOf(bb[0]), cx1 = cellOf(bb[2]);
-        int cy0 = cellOf(bb[1]), cy1 = cellOf(bb[3]);
+        return overlapsAny(candidate, bb, 0);
+    }
+
+    /**
+     * Como {@link #overlapsAny(Polygon)}, mas alem de sobreposicao real
+     * tambem rejeita candidatos a MENOS de {@code gapMm} de qualquer
+     * poligono ja inserido (nao so ausencia de sobreposicao) - a consulta
+     * usa {@code queryBb} (a bbox do candidato inflada por gapMm por quem
+     * chama) pra nao perder vizinhos que estao proximos mas fora da bbox
+     * justa. Usado por {@code SheetPacker#tileRegion} pra respeitar o
+     * espacamento pedido de verdade, nao so evitar colisao (bug real
+     * corrigido nesta sessao: o reaproveitamento de sobra empurrava peca a
+     * ~1mm de distancia mesmo com gapMm bem maior pedido).
+     */
+    boolean overlapsAny(Polygon candidate, double[] queryBb, double gapMm) {
+        int cx0 = cellOf(queryBb[0]), cx1 = cellOf(queryBb[2]);
+        int cy0 = cellOf(queryBb[1]), cy1 = cellOf(queryBb[3]);
         Set<Polygon> tested = null;
+        double threshold = Math.max(0, gapMm - 0.05);
         for (int cx = cx0; cx <= cx1; cx++) {
             for (int cy = cy0; cy <= cy1; cy++) {
                 List<Polygon> bucket = buckets.get(key(cx, cy));
@@ -56,7 +72,7 @@ final class SpatialIndex {
                         if (tested == null) tested = new HashSet<>();
                         if (!tested.add(other)) continue;
                     }
-                    if (GeometryOps.overlaps(candidate, other)) return true;
+                    if (threshold > 0 ? GeometryOps.closerThan(candidate, other, threshold) : GeometryOps.overlaps(candidate, other)) return true;
                 }
             }
         }

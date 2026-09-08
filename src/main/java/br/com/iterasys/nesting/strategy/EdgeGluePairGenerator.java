@@ -52,8 +52,24 @@ public final class EdgeGluePairGenerator implements PairGenerator {
             double dot = (mid.x - centroid.x) * nx + (mid.y - centroid.y) * ny;
             if (dot < 0) { nx = -nx; ny = -ny; }
 
-            double tx = 2 * (mid.x - centroid.x) + nx * gapMm;
-            double ty = 2 * (mid.y - centroid.y) + ny * gapMm;
+            // Posicao BASE (sem gap): reflete a peca em torno do ponto medio
+            // da aresta - alinha a aresta espelhada exatamente sobre a
+            // original. Peca CONVEXA: essa posicao ja e o contato real
+            // (distancia 0). Peca CONCAVA: outras partes da peca podem
+            // colidir antes disso - somar gapMm as cegas sem medir podia
+            // entregar folga real MENOR que o pedido (bug real, encontrado
+            // testando espacamento grande contra peca em L). Corrige medindo
+            // a distancia de contato VERDADEIRA na direcao normal via
+            // minSeparation (mesma tecnica que LatticeFinder ja usa) antes
+            // de somar o gap.
+            double baseTx = 2 * (mid.x - centroid.x);
+            double baseTy = 2 * (mid.y - centroid.y);
+            Polygon pieceBBase = new PlacedPieceInstance(false, 180.0, new Point2D(baseTx, baseTy)).materialize(piece, centroid);
+            double contactD = GeometryOps.minSeparation(pieceA, pieceBBase, new Point2D(nx, ny), 3000, 0.05);
+            if (Double.isNaN(contactD)) continue;
+            double total = contactD + gapMm;
+            double tx = baseTx + nx * total;
+            double ty = baseTy + ny * total;
             PlacedPieceInstance candidate = new PlacedPieceInstance(false, 180.0, new Point2D(tx, ty));
             Polygon pieceB = candidate.materialize(piece, centroid);
 

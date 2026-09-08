@@ -1,8 +1,81 @@
 # Nesting PRO — Handoff de continuidade
 
 Backup de continuidade. Tudo abaixo está commitado e pushado em
-`AlfLion/Intro_Java`, branch `claude/nesting-2d-irregular-engine-m2x79f`,
-até o commit `82f0e42` (packBestSplit + bugfixes de limite de área útil).
+`AlfLion/Intro_Java`, branch `claude/nesting-2d-irregular-engine-m2x79f`.
+
+## ATUALIZAÇÃO IMPORTANTE: 3 bugs reais de espaçamento (gapMm) corrigidos
+
+O usuário testou a ferramenta interativa (Artifact HTML com porte 1:1 do
+motor em JS) e reportou: "acho que ele respeita o espaçamento em alguns
+casos e outros não". Investigação confirmou — **3 bugs reais**, todos no
+motor Java (fonte de verdade) e replicados no porte JS do Artifact:
+
+1. **`LatticeFinder.diagonalNeighborsValid`**: `v1`/`v2` (os 2 vetores da
+   rede) garantem `gapMm` nas SUAS próprias direções (a distância de
+   contato + gapMm foi usada pra construí-los), mas o vizinho DIAGONAL
+   (`v1+v2` ou `v1-v2`) só era testado contra sobreposição ZERO, nunca
+   contra o gap pedido. Peça em L com gap=50mm media apenas ~1mm de folga
+   real na direção diagonal. Corrigido: `diagonalNeighborsValid` agora
+   exige folga real (`GeometryOps.closerThan`), não só ausência de
+   sobreposição.
+
+2. **`EdgeGluePairGenerator`** ("cola-por-aresta"): construía a posição da
+   peça espelhada refletindo em torno do ponto médio da aresta + somando
+   `gapMm` "às cegas" na direção da normal, sem medir a distância de
+   contato real. Para peças CONVEXAS isso é exato (contato = 0), mas para
+   peças CÔNCAVAS outras partes do contorno podem colidir antes disso,
+   deixando folga real MENOR que o gap pedido. Corrigido: agora mede a
+   distância de contato verdadeira via `GeometryOps.minSeparation` (mesma
+   técnica que `LatticeFinder` já usava) antes de somar o gap.
+
+3. **`SheetPacker.tileRegion`** (usado tanto na tiling primária quanto no
+   reaproveitamento de sobra via `tryBestRotationInRegion`): só testava
+   `SpatialIndex.overlapsAny` (sobreposição zero) contra as peças já
+   aceitas — o reaproveitamento de sobra podia empurrar uma peça
+   reaproveitada a ~1mm de uma peça primária mesmo pedindo 50mm de gap.
+   Corrigido: nova sobrecarga `SpatialIndex.overlapsAny(candidate, bbox
+   inflado por gap, gapMm)` usando `GeometryOps.closerThan` (distância
+   real segmento-a-segmento com early-exit, barato porque roda em
+   geometria SIMPLIFICADA durante a busca).
+
+**Impacto real medido** (mesma correção replicada em Java e no Artifact
+JS, números cross-validados batendo exatamente entre os dois):
+- `BRACKET_COMPACTO.DXF` (peça côncava com 3 furos): 648 → 339 peças
+  (gap=2mm chapa 914×1010mm)
+- `15746A.DXF` (anel curvo fino): 106 → 53 peças (gap=2mm chapa
+  1095×914mm) — o resultado antigo tinha folga real de só 1.52mm em 123
+  pares de peças vizinhas, apesar de pedir 2mm
+- `2CIRC.DXF` (kit part-in-part, `RingKitDemo`): 20 → 18 kits completos
+  (gap=3mm chapa 500×500mm)
+- `TRAP.DXF` (trapézio convexo): 10 → 10 peças, sem mudança (peça convexa
+  nunca tinha esse problema)
+
+**Isso é uma correção, não uma regressão**: os números antigos eram
+inflados por violar silenciosamente o espaçamento pedido em formas
+côncavas/curvas — sempre zero colisão real (validado), mas nem sempre
+respeitando o `gapMm`. Peças convexas simples (trapézio, retângulo) nunca
+tiveram esse problema. `GeometryOps` ganhou `closerThan(a, b, threshold)`
+(distância real poligono-a-poligono com early-exit) como utilitário novo,
+reaproveitável em qualquer lugar que precise de "folga mínima garantida",
+não só zero-colisão.
+
+## Bancada de testes interativa (Artifact, substituindo `tools/bancada.html`)
+
+Nova ferramenta publicada como Artifact — motor real (mesmo algoritmo do
+Java, testado numericamente contra os fixtures antes de publicar, não uma
+simulação), rodando inteiramente no navegador via Web Worker (não trava a
+aba mesmo em casos de 600+ peças). Funcionalidades: upload de DXF real
+(parser LINE/ARC/CIRCLE/LWPOLYLINE com bulge e unidades), preview da peça
+antes de rodar, estimativa rápida + busca completa (mesmo padrão
+"calcularDicaLimpa"/"autorizarBuscaCompletaKit" do app Básico), teste
+automático de deitada+em pé (`packBestOrientation`), validação
+independente exibida na tela (não usa a lógica interna do motor pra
+provar 0 colisões/0 fora da margem), histórico comparável de múltiplos
+testes na mesma sessão, e **exportação DXF** da chapa nesteada (peça em
+resolução PLENA, cada instância numa layer própria `PECA_NNN`, mais
+layers de referência `CHAPA`/`AREA_UTIL`) — como o navegador sandboxed não
+deixa baixar arquivo diretamente, o export abre um modal com o texto pra
+copiar e colar num arquivo `.dxf` novo.
 
 ## Método de trabalho (vale pra toda a frente Nesting PRO)
 

@@ -64,6 +64,51 @@ public final class GeometryOps {
     }
 
     /**
+     * Testa se dois poligonos se sobrepoem OU se a distancia real minima
+     * entre eles (aresta-a-aresta) fica abaixo de {@code threshold} - com
+     * early-exit assim que confirma (nao precisa achar a distancia minima
+     * exata pra rejeitar). Diferente de {@link #overlaps}, que so prova
+     * ausencia de sobreposicao (distancia > 0), este metodo prova uma folga
+     * MINIMA real entre os dois poligonos. Usado para respeitar o gapMm
+     * pedido em todo lugar que antes so testava sobreposicao zero (bug real:
+     * ver historico de {@code SheetPacker#tileRegion} e
+     * {@code LatticeFinder#diagonalNeighborsValid}).
+     */
+    public static boolean closerThan(Polygon a, Polygon b, double threshold) {
+        if (overlaps(a, b)) return true;
+        if (threshold <= 0) return false;
+        List<Point2D> va = a.getVertices();
+        List<Point2D> vb = b.getVertices();
+        int na = va.size();
+        int nb = vb.size();
+        for (int i = 0; i < na; i++) {
+            Point2D a1 = va.get(i);
+            Point2D a2 = va.get((i + 1) % na);
+            for (int j = 0; j < nb; j++) {
+                Point2D b1 = vb.get(j);
+                Point2D b2 = vb.get((j + 1) % nb);
+                if (segmentDistance(a1, a2, b1, b2) < threshold) return true;
+            }
+        }
+        return false;
+    }
+
+    private static double segmentDistance(Point2D p1, Point2D p2, Point2D p3, Point2D p4) {
+        return Math.min(
+                Math.min(distPointSeg(p1, p3, p4), distPointSeg(p2, p3, p4)),
+                Math.min(distPointSeg(p3, p1, p2), distPointSeg(p4, p1, p2)));
+    }
+
+    private static double distPointSeg(Point2D p, Point2D a, Point2D b) {
+        double abx = b.x - a.x, aby = b.y - a.y;
+        double denom = abx * abx + aby * aby;
+        double t = denom < 1e-12 ? 0 : ((p.x - a.x) * abx + (p.y - a.y) * aby) / denom;
+        t = Math.max(0, Math.min(1, t));
+        double cx = a.x + abx * t, cy = a.y + aby * t;
+        return Math.hypot(p.x - cx, p.y - cy);
+    }
+
+    /**
      * Menor distancia de translacao ao longo de {@code direction} (a partir da
      * posicao atual de {@code moving}) para que {@code moving} pare de sobrepor
      * {@code fixedPoly}. Retorna 0 se ja nao ha sobreposicao. Retorna NaN se nem em
